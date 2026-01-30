@@ -6,8 +6,7 @@ import { TransactionTable } from './components/transaction-table';
 import { ErrorDisplay } from './components/error-display';
 import { fetchAllTransactions, parseTransaction, isValidOsmosisAddress } from './services/osmosis';
 import { convertToAwakenCSV, generateCSVContent, downloadCSV, generateFilename } from './utils/csvExport';
-import { OsmosisTransaction, ParsedTransaction } from './types';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { OsmosisTransaction, ParsedTransaction, CSVFormat } from './types';
 
 export default function Home() {
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
@@ -15,6 +14,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentAddress, setCurrentAddress] = useState<string>('');
+  const [csvFormat, setCsvFormat] = useState<CSVFormat>('standard');
 
   const handleWalletSubmit = async (address: string) => {
     setIsLoading(true);
@@ -56,9 +56,9 @@ export default function Home() {
   const handleDownloadCSV = () => {
     if (transactions.length === 0 || !currentAddress) return;
 
-    const awakenRows = convertToAwakenCSV(transactions, currentAddress);
+    const awakenRows = convertToAwakenCSV(transactions, currentAddress, csvFormat);
     const csvContent = generateCSVContent(awakenRows);
-    const filename = generateFilename(currentAddress);
+    const filename = generateFilename(currentAddress, csvFormat);
     
     downloadCSV(csvContent, filename);
   };
@@ -115,6 +115,30 @@ export default function Home() {
         {/* Transaction Table */}
         {!isLoading && transactions.length > 0 && (
           <div className="mt-8">
+            {/* CSV Format Selector */}
+            <div className="mb-6 flex items-center justify-between bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-4">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  CSV Export Format:
+                </label>
+                <select
+                  value={csvFormat}
+                  onChange={(e) => setCsvFormat(e.target.value as CSVFormat)}
+                  className="px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+                >
+                  <option value="standard">Standard (Transactions)</option>
+                  <option value="trading">Trading/Perpetuals</option>
+                </select>
+              </div>
+              <div className="text-sm text-slate-500 dark:text-slate-400">
+                {csvFormat === 'standard' ? (
+                  <span>Columns: Date, Received/Sent Qty, Currency, Fee, Notes</span>
+                ) : (
+                  <span>Columns: Date, Asset, Amount, P&L, Fee, Tag</span>
+                )}
+              </div>
+            </div>
+            
             <TransactionTable 
               transactions={transactions} 
               onDownloadCSV={handleDownloadCSV}
@@ -141,7 +165,7 @@ export default function Home() {
             <div className="p-6 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
               <h3 className="font-semibold text-lg mb-2">3. Export CSV</h3>
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Download your transactions in Awaken Tax CSV format
+                Download in Standard or Trading format for Awaken Tax
               </p>
             </div>
           </div>

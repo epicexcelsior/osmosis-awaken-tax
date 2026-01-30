@@ -51,21 +51,37 @@ export interface Coin {
   amount: string;
 }
 
-// Awaken Tax CSV Format
+// Awaken Tax CSV Format (Standard Transaction Format)
+// Based on: Date, Received Quantity, Received Currency, Sent Quantity, Sent Currency, Fee Amount, Fee Currency, Notes
 export interface AwakenTaxRow {
-  'Date': string; // MM/DD/YYYY HH:MM:SS UTC
+  'Date': string; // M/D/YY H:MM format (e.g., "2/6/23 11:29")
   'Received Quantity': string;
   'Received Currency': string;
-  'Received Fiat Amount': string;
   'Sent Quantity': string;
   'Sent Currency': string;
-  'Sent Fiat Amount': string;
   'Fee Amount': string;
   'Fee Currency': string;
-  'Transaction Hash': string;
   'Notes': string;
-  'Tag': string; // buy, sell, transfer, etc.
 }
+
+// Awaken Tax CSV Format (Perpetuals/Trading Format)
+// Based on: example.csv
+// Columns: Date, Asset, Amount, Fee, P&L, Payment Token, ID, Notes, Tag, Transaction Hash
+export interface AwakenTaxTradingRow {
+  'Date': string; // YYYY-MM-DD format
+  'Asset': string;
+  'Amount': string;
+  'Fee': string;
+  'P&L': string;
+  'Payment Token': string;
+  'ID': string;
+  'Notes': string;
+  'Tag': string; // open_position, close_position, funding_payment
+  'Transaction Hash': string;
+}
+
+// CSV Export format type
+export type CSVFormat = 'standard' | 'trading';
 
 // Simplified transaction for UI display
 export interface ParsedTransaction {
