@@ -1,6 +1,57 @@
 import { OsmosisTransaction, ParsedTransaction, TransactionType } from '../types';
 
 /**
+ * Test function to verify LCD endpoints work
+ */
+export async function testLCDEndpoint(address: string = 'osmo1g8gv8ayl55698fscstajt9uqw9r6w8a34aly9v'): Promise<any> {
+  console.log(`[TEST] Testing LCD endpoints for address: ${address}`);
+  
+  const LCD_ENDPOINTS = [
+    'https://lcd.osmosis.zone',
+    'https://osmosis-api.polkachu.com',
+    'https://api.osmosis.interbloc.org',
+    'https://osmosis-rest.publicnode.com',
+    'https://rest.osmosis.lava.build',
+    'https://osmosis.rest.stakin-nodes.com',
+  ];
+  
+  const results: any[] = [];
+  
+  for (const endpoint of LCD_ENDPOINTS) {
+    try {
+      const url = `${endpoint}/cosmos/tx/v1beta1/txs?events=message.sender='${address}'&pagination.limit=10&order_by=ORDER_BY_DESC`;
+      console.log(`[TEST] Trying: ${url}`);
+      
+      const response = await fetch(url, {
+        headers: { 'Accept': 'application/json' },
+      });
+      
+      const result: any = { endpoint, url, status: response.status };
+      
+      if (response.ok) {
+        const data = await response.json();
+        result.txCount = data.tx_responses?.length || 0;
+        result.total = data.pagination?.total || 'N/A';
+        console.log(`[TEST] ✓ Success! ${result.txCount} transactions found`);
+      } else {
+        result.error = await response.text().catch(() => 'Unknown error');
+        console.log(`[TEST] ✗ Failed: ${result.error?.substring(0, 100)}`);
+      }
+      
+      results.push(result);
+    } catch (error) {
+      results.push({
+        endpoint,
+        error: error instanceof Error ? error.message : 'Fetch failed',
+      });
+      console.log(`[TEST] ✗ Exception: ${error}`);
+    }
+  }
+  
+  return results;
+}
+
+/**
  * Fetch transactions via Cloudflare Function (server-side proxy)
  * This avoids CORS issues by running on Cloudflare's edge network
  */
@@ -10,10 +61,14 @@ export async function fetchAllTransactions(
 ): Promise<OsmosisTransaction[]> {
   console.log(`[fetchAllTransactions] Fetching via Cloudflare Function for: ${address}`);
   
+  // For local testing, run LCD test first
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    const testResults = await testLCDEndpoint(address);
+    console.log('[TEST] LCD Test Results:', testResults);
+  }
+  
   try {
     // Use the Cloudflare Function endpoint
-    // In development, this will proxy through Next.js
-    // In production on Cloudflare Pages, this runs as an edge function
     const response = await fetch(`/api/transactions?address=${encodeURIComponent(address)}&limit=${limit}`, {
       method: 'GET',
       headers: {
@@ -27,7 +82,7 @@ export async function fetchAllTransactions(
     }
 
     const data = await response.json();
-    console.log(`[fetchAllTransactions] Successfully fetched ${data.transactions?.length || 0} transactions`);
+    console.log(`[fetchAllTransactions] Response:`, data);
     return data.transactions || [];
   } catch (error) {
     console.error('[fetchAllTransactions] Error:', error);
