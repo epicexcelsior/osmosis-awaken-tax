@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { WalletInput } from './components/wallet-input';
 import { TransactionTable } from './components/transaction-table';
 import { ErrorDisplay } from './components/error-display';
-import { fetchAllTransactions, parseTransaction, isValidOsmosisAddress } from './services/osmosis';
+import { fetchAllTransactionsClientSide, parseTransaction, isValidOsmosisAddress } from './services/osmosis-client';
 import { convertToAwakenCSV, generateCSVContent, downloadCSV, generateFilename } from './utils/csvExport';
 import { OsmosisTransaction, ParsedTransaction, CSVFormat } from './types';
 
@@ -34,14 +34,21 @@ export default function Home() {
 
       setCurrentAddress(address);
 
-      // Fetch transactions (up to 5000 for tax reporting)
-      const result = await fetchAllTransactions(address, 5000);
+      // Fetch transactions client-side (no server needed!)
+      const result = await fetchAllTransactionsClientSide(address, (count, total) => {
+        console.log(`[Progress] Fetched ${count} of ~${total} transactions`);
+      });
       setRawTransactions(result.transactions);
       setTxMetadata(result.metadata);
-      setTxVerification(result.verification);
+      setTxVerification({
+        complete: result.transactions.length > 100,
+        message: result.transactions.length > 0 
+          ? `✓ Found ${result.transactions.length} transactions via client-side fetching`
+          : 'No transactions found'
+      });
 
       // Parse transactions
-      const parsed = result.transactions.map((tx) => parseTransaction(tx, address));
+      const parsed = result.transactions.map((tx: OsmosisTransaction) => parseTransaction(tx, address));
       setTransactions(parsed);
 
       if (parsed.length === 0) {
@@ -82,26 +89,17 @@ export default function Home() {
           </p>
         </div>
 
-        {/* API Key Notice */}
-        <div className="mb-8 p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg max-w-3xl mx-auto">
-          <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
-            API Configuration
+        {/* Client-side Notice */}
+        <div className="mb-8 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg max-w-3xl mx-auto">
+          <h3 className="font-semibold text-green-900 dark:text-green-100 mb-2">
+            100% Client-Side - No Server Needed!
           </h3>
-          <p className="text-sm text-blue-800 dark:text-blue-200">
-            This app uses the free Osmosis LCD API by default. For production use with higher rate limits, 
-            you can configure a Mintscan API key via environment variables: 
-            <code className="bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded mx-1">NEXT_PUBLIC_MINTSCAN_API_KEY</code>
+          <p className="text-sm text-green-800 dark:text-green-200">
+            This app fetches directly from Osmosis blockchain nodes in your browser. 
+            No API keys needed, no server timeouts, completely free and open source.
           </p>
-          <p className="text-sm text-blue-800 dark:text-blue-200 mt-2">
-            Get your API key at:{' '}
-            <a 
-              href="https://api.mintscan.io" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="underline hover:text-blue-600"
-            >
-              api.mintscan.io
-            </a>
+          <p className="text-sm text-green-800 dark:text-green-200 mt-2">
+            Uses multiple query types to find all your transactions: sends, receives, swaps, staking, IBC transfers, and more!
           </p>
         </div>
 

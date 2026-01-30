@@ -16,9 +16,10 @@ interface OsmosisTransaction {
   };
 }
 
-// Mintscan API Configuration
-const MINTSCAN_API_KEY = 'eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTM2NywiaWF0IjoxNzY5ODEzMTMzfQ.fssPTYzAgdlHGlNkypDmMVFV_dY5mHycPtt18ud0N1YakQ_F_d_2CPrS59UUZgW05sbRE-1w-I1o22qh7SKF3g';
-const MINTSCAN_BASE_URL = 'https://apis.mintscan.io';
+const RPC_ENDPOINTS = [
+  'https://rpc.osmosis.zone',
+  'https://osmosis-rpc.polkachu.com',
+];
 
 export async function onRequestGet(context: {
   request: Request;
@@ -27,7 +28,7 @@ export async function onRequestGet(context: {
   const { request } = context;
   const url = new URL(request.url);
   const address = url.searchParams.get('address');
-  const limit = parseInt(url.searchParams.get('limit') || '10000', 10);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '5000', 10), 10000);
 
   if (!address) {
     return new Response(
@@ -36,203 +37,127 @@ export async function onRequestGet(context: {
     );
   }
 
-  console.log(`[Mintscan] Fetching all transactions for ${address}`);
-  
-  try {
-    const allTransactions: OsmosisTransaction[] = [];
-    let searchAfter: string | null = null;
-    let pageCount = 0;
-    let totalCount = 0;
-    const MAX_PAGES = 500; // Safety limit
-    
-    do {
-      pageCount++;
-      
-      // Build URL with pagination
-      let mintscanUrl: string;
-      if (searchAfter) {
-        mintscanUrl = `${MINTSCAN_BASE_URL}/v1/osmosis/accounts/${address}/transactions?take=100&searchAfter=${encodeURIComponent(searchAfter)}`;
-      } else {
-        mintscanUrl = `${MINTSCAN_BASE_URL}/v1/osmosis/accounts/${address}/transactions?take=100`;
-      }
-      
-      console.log(`[Mintscan] Page ${pageCount}: ${mintscanUrl.substring(0, 80)}...`);
-      
-      const response = await fetch(mintscanUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${MINTSCAN_API_KEY}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.error(`[Mintscan] Error ${response.status}: ${errorText}`);
-        throw new Error(`Mintscan API error: ${response.status}`);
-      }
-
-      const data: any = await response.json();
-      
-      // Mintscan returns data in response.data array
-      const mintscanTxs = data.data || [];
-      const pagination = data.pagination || {};
-      
-      console.log(`[Mintscan] Page ${pageCount}: Got ${mintscanTxs.length} txs, hasMore: ${!!pagination.searchAfter}`);
-      
-      if (mintscanTxs.length > 0) {
-        // Convert Mintscan format to our format
-        const converted = mintscanTxs.map((tx: any) => convertMintscanToOsmosisFormat(tx));
-        allTransactions.push(...converted);
-        
-        if (pagination.total) {
-          totalCount = parseInt(pagination.total, 10);
-        }
-      }
-      
-      // Get next page token
-      searchAfter = pagination.searchAfter || null;
-      
-      // Stop conditions
-      if (allTransactions.length >= limit) {
-        console.log(`[Mintscan] Hit limit: ${allTransactions.length} transactions`);
-        break;
-      }
-      
-      if (pageCount >= MAX_PAGES) {
-        console.log(`[Mintscan] Hit max pages: ${MAX_PAGES}`);
-        break;
-      }
-      
-      // If no more pages, stop
-      if (!searchAfter) {
-        console.log(`[Mintscan] No more pages (searchAfter is null)`);
-        break;
-      }
-      
-    } while (searchAfter);
-    
-    console.log(`[Mintscan] Complete: ${allTransactions.length} transactions from ${pageCount} pages`);
-    
-    // Sort by timestamp (newest first)
-    allTransactions.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-    
-    // Get date range
-    const dates = allTransactions.map(tx => new Date(tx.timestamp));
-    const firstDate = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
-    const lastDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
-    
-    const metadata = {
-      address,
-      totalFetched: allTransactions.length,
-      totalReported: totalCount,
-      pagesFetched: pageCount,
-      firstTransactionDate: firstDate?.toISOString(),
-      lastTransactionDate: lastDate?.toISOString(),
-      dataSource: 'Mintscan API (apis.mintscan.io)',
-      queryType: 'v1/accounts/transactions with pagination',
-    };
-
-    return new Response(
-      JSON.stringify({
-        transactions: allTransactions.slice(0, limit),
-        metadata,
-        verification: {
-          complete: allTransactions.length >= totalCount * 0.95 || !searchAfter,
-          message: !searchAfter 
-            ? `✓ Complete dataset: ${allTransactions.length} transactions (${firstDate?.toLocaleDateString()} - ${lastDate?.toLocaleDateString()}) via Mintscan`
-            : `⚠ Fetched ${allTransactions.length} of ~${totalCount} transactions (pagination incomplete)`,
-        }
-      }),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      }
-    );
-    
-  } catch (error) {
-    console.error(`[Mintscan] Failed:`, error);
-    
-    // Fallback to LCD
-    return fallbackToLCD(address, limit);
-  }
-}
-
-async function fallbackToLCD(address: string, limit: number): Promise<Response> {
-  const LCD_ENDPOINTS = [
-    'https://lcd.osmosis.zone',
-    'https://osmosis-api.polkachu.com',
-    'https://rest-osmosis.blockapsis.com',
-  ];
+  console.log(`[RPC] Fetching for ${address}`);
   
   const allTransactions = new Map<string, OsmosisTransaction>();
-  const BATCH_SIZE = 100;
-  const queryTypes = [
-    `message.sender='${address}'`,
-    `transfer.recipient='${address}'`,
-    `ibc_transfer.sender='${address}'`,
-    `ibc_transfer.receiver='${address}'`,
-    `delegate.delegator_address='${address}'`,
-    `withdraw_rewards.delegator_address='${address}'`,
-  ];
+  let totalFound = 0;
   
-  for (const endpoint of LCD_ENDPOINTS) {
+  // Try each RPC endpoint
+  for (const rpcEndpoint of RPC_ENDPOINTS) {
+    console.log(`[RPC] Trying ${rpcEndpoint}`);
+    
     try {
-      for (const query of queryTypes) {
-        let nextKey: string | null = null;
-        let pageCount = 0;
+      // Query types to try
+      const queries = [
+        `transfer.recipient='${address}'`,
+        `transfer.sender='${address}'`,
+        `message.sender='${address}'`,
+      ];
+      
+      for (const queryStr of queries) {
+        const query = `"${queryStr}"`;
+        let page = 1;
+        let hasMore = true;
+        let endpointTotal = 0;
         
-        do {
-          pageCount++;
-          const urlString: string = nextKey 
-            ? `${endpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(query)}&pagination.key=${encodeURIComponent(nextKey)}&pagination.limit=${BATCH_SIZE}`
-            : `${endpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(query)}&pagination.limit=${BATCH_SIZE}`;
-          
-          const fetchResponse = await fetch(urlString, { headers: { 'Accept': 'application/json' } });
-          
-          if (fetchResponse.ok) {
-            const responseData: any = await fetchResponse.json();
-            const batch: OsmosisTransaction[] = responseData.tx_responses || [];
-            batch.forEach((tx: OsmosisTransaction) => allTransactions.set(tx.txhash, tx));
-            nextKey = responseData.pagination?.next_key;
-          } else {
+        while (hasMore && page <= 50 && allTransactions.size < limit) {
+          try {
+            const rpcUrl = `${rpcEndpoint}/tx_search?query=${encodeURIComponent(query)}&prove=false&page=${page}&per_page=30&order_by=desc`;
+            
+            console.log(`[RPC] ${queryStr} page ${page}`);
+            
+            const response = await fetch(rpcUrl, {
+              headers: { 'Accept': 'application/json' },
+            });
+            
+            if (!response.ok) {
+              console.log(`[RPC] Error ${response.status}`);
+              break;
+            }
+            
+            const data: any = await response.json();
+            
+            if (data.error) {
+              console.log(`[RPC] RPC error:`, data.error);
+              break;
+            }
+            
+            const result = data.result;
+            if (!result || !result.txs) {
+              console.log(`[RPC] No txs in result`);
+              break;
+            }
+            
+            const txs = result.txs;
+            endpointTotal = parseInt(result.total_count || '0', 10);
+            
+            console.log(`[RPC] Got ${txs.length} txs (total: ${endpointTotal})`);
+            
+            // Add transactions
+            for (const tx of txs) {
+              const converted = convertTendermintToOsmosisFormat(tx);
+              if (converted && converted.txhash) {
+                allTransactions.set(converted.txhash, converted);
+              }
+            }
+            
+            // Check for more pages
+            hasMore = txs.length === 30 && page * 30 < endpointTotal;
+            
+            if (!hasMore) {
+              console.log(`[RPC] No more pages for ${queryStr}`);
+              break;
+            }
+            
+          } catch (error) {
+            console.error(`[RPC] Error on page ${page}:`, error);
             break;
           }
           
-          if (pageCount >= 20 || allTransactions.size >= limit) break;
-        } while (nextKey);
+          page++;
+        }
+        
+        totalFound += endpointTotal;
       }
       
-      if (allTransactions.size > 0) break;
+      if (allTransactions.size > 0) {
+        console.log(`[RPC] Found ${allTransactions.size} txs from ${rpcEndpoint}`);
+        break;
+      }
+      
     } catch (error) {
-      console.error(`[LCD] ${endpoint} failed`);
+      console.error(`[RPC] ${rpcEndpoint} failed:`, error);
     }
   }
-  
+
+  // Convert to array and sort
   const uniqueTxs = Array.from(allTransactions.values());
-  uniqueTxs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  
+  uniqueTxs.sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
   const dates = uniqueTxs.map(tx => new Date(tx.timestamp));
   const firstDate = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
   const lastDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
   
+  console.log(`[RPC] Complete: ${uniqueTxs.length} unique txs`);
+
   return new Response(
     JSON.stringify({
       transactions: uniqueTxs.slice(0, limit),
       metadata: {
         address,
         totalFetched: uniqueTxs.length,
+        totalFromRPC: totalFound,
         firstTransactionDate: firstDate?.toISOString(),
         lastTransactionDate: lastDate?.toISOString(),
-        dataSource: 'LCD API (fallback)',
+        dataSource: 'Tendermint RPC (tx_search)',
       },
       verification: {
-        complete: false,
-        message: `Partial data via LCD: ${uniqueTxs.length} transactions`,
+        complete: uniqueTxs.length >= totalFound * 0.9,
+        message: uniqueTxs.length > 0
+          ? `✓ Found ${uniqueTxs.length} transactions (${firstDate?.toLocaleDateString()} - ${lastDate?.toLocaleDateString()})`
+          : `No transactions found`,
       }
     }),
     {
@@ -245,24 +170,47 @@ async function fallbackToLCD(address: string, limit: number): Promise<Response> 
   );
 }
 
-function convertMintscanToOsmosisFormat(mintscanTx: any): OsmosisTransaction {
-  return {
-    txhash: mintscanTx.tx_hash || mintscanTx.hash || mintscanTx.id || '',
-    height: String(mintscanTx.height || '0'),
-    timestamp: mintscanTx.timestamp || new Date().toISOString(),
-    code: mintscanTx.code || 0,
-    tx: {
-      body: {
-        messages: mintscanTx.messages || [],
-        memo: mintscanTx.memo || '',
-      },
-      auth_info: {
-        fee: {
-          amount: mintscanTx.fee?.amount || [],
+function convertTendermintToOsmosisFormat(tx: any): OsmosisTransaction | null {
+  try {
+    if (!tx.hash) return null;
+    
+    // Get timestamp from tx_result.events
+    let timestamp = new Date().toISOString();
+    if (tx.tx_result && tx.tx_result.events) {
+      // Look for timestamp in events
+      for (const event of tx.tx_result.events) {
+        if (event.attributes) {
+          for (const attr of event.attributes) {
+            if (attr.key === 'timestamp' || attr.key === 'time') {
+              timestamp = attr.value;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    return {
+      txhash: tx.hash,
+      height: String(tx.height || '0'),
+      timestamp: timestamp,
+      code: tx.tx_result?.code || 0,
+      tx: {
+        body: {
+          messages: [],
+          memo: '',
+        },
+        auth_info: {
+          fee: {
+            amount: [],
+          },
         },
       },
-    },
-  };
+    };
+  } catch (error) {
+    console.error(`[Convert] Error:`, error);
+    return null;
+  }
 }
 
 export async function onRequestOptions() {
