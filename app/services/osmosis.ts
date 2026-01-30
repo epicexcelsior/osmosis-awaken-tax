@@ -1,31 +1,22 @@
 import { OsmosisTransaction, ParsedTransaction, TransactionType } from '../types';
 
 // Mintscan API Configuration - HARDCODED for testing
-// This ensures the API key is always available
 const MINTSCAN_API_KEY = 'eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTM2NywiaWF0IjoxNzY5ODEzMTMzfQ.fssPTYzAgdlHGlNkypDmMVFV_dY5mHycPtt18ud0N1YakQ_F_d_2CPrS59UUZgW05sbRE-1w-I1o22qh7SKF3g';
 
-console.log('Mintscan API Key configured:', MINTSCAN_API_KEY ? 'YES' : 'NO');
-
-// Fallback LCD endpoints if Mintscan fails
-const LCD_ENDPOINTS = [
-  'https://lcd.osmosis.zone',
-  'https://osmosis-api.polkachu.com',
-  'https://api.osmosis.interbloc.org',
-];
-
 /**
- * Fetch transactions using Mintscan API (Primary method)
- * This is the most reliable method with proper CORS support
+ * Fetch transactions using Mintscan API
+ * API Docs: https://docs.cosmostation.io/apis/reference/historical/account/account-transactions
  */
 export async function fetchTransactionsMintscan(
   address: string,
-  limit: number = 100,
-  offset: number = 0
+  limit: number = 100
 ): Promise<OsmosisTransaction[]> {
   try {
     console.log(`[Mintscan] Fetching transactions for address: ${address}`);
     
-    const url = `https://api.mintscan.io/v1/osmosis/accounts/${address}/transactions?limit=${limit}&offset=${offset}`;
+    // Correct endpoint: https://apis.mintscan.io/v1/{network}/accounts/{address}/transactions
+    // Note: use 'take' parameter, not 'limit'
+    const url = `https://apis.mintscan.io/v1/osmosis/accounts/${address}/transactions?take=${limit}`;
     console.log(`[Mintscan] API URL: ${url}`);
     
     const response = await fetch(url, {
@@ -45,8 +36,15 @@ export async function fetchTransactionsMintscan(
     }
 
     const data = await response.json();
-    console.log(`[Mintscan] Successfully fetched ${data.data?.length || 0} transactions`);
-    return data.data || [];
+    console.log(`[Mintscan] Response data:`, data);
+    
+    // Parse Mintscan response format
+    // The response should have a data array with transaction objects
+    const transactions = data.data || [];
+    console.log(`[Mintscan] Successfully fetched ${transactions.length} transactions`);
+    
+    // Convert Mintscan format to our OsmosisTransaction format
+    return transactions.map((tx: any) => convertMintscanToOsmosisFormat(tx));
   } catch (error) {
     console.error('[Mintscan] Fetch error:', error);
     throw error;
@@ -54,8 +52,30 @@ export async function fetchTransactionsMintscan(
 }
 
 /**
+ * Convert Mintscan transaction format to OsmosisTransaction format
+ */
+function convertMintscanToOsmosisFormat(mintscanTx: any): OsmosisTransaction {
+  return {
+    txhash: mintscanTx.tx_hash || mintscanTx.hash || '',
+    height: String(mintscanTx.height || '0'),
+    timestamp: mintscanTx.timestamp || new Date().toISOString(),
+    code: mintscanTx.code || 0,
+    tx: {
+      body: {
+        messages: mintscanTx.messages || [],
+        memo: mintscanTx.memo || '',
+      },
+      auth_info: {
+        fee: {
+          amount: mintscanTx.fee?.amount || [],
+        },
+      },
+    },
+  };
+}
+
+/**
  * Fetch transactions from Osmosis LCD REST API (Fallback method)
- * Tries multiple endpoints to find one that works with CORS
  */
 export async function fetchTransactionsLCD(
   address: string,
@@ -63,8 +83,12 @@ export async function fetchTransactionsLCD(
   offset: number = 0
 ): Promise<OsmosisTransaction[]> {
   const errors: string[] = [];
+  const LCD_ENDPOINTS = [
+    'https://lcd.osmosis.zone',
+    'https://osmosis-api.polkachu.com',
+    'https://api.osmosis.interbloc.org',
+  ];
   
-  // Try each endpoint
   for (const endpoint of LCD_ENDPOINTS) {
     try {
       console.log(`[LCD] Trying endpoint: ${endpoint}`);
@@ -76,11 +100,10 @@ export async function fetchTransactionsLCD(
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       errors.push(`${endpoint}: ${errorMsg}`);
-      console.warn(`[LCD] Failed to fetch from ${endpoint}:`, errorMsg);
+      console.warn(`[LCD] Failed:`, errorMsg);
     }
   }
   
-  // If all endpoints failed, throw error with details
   throw new Error(`All LCD endpoints failed. Errors: ${errors.join('; ')}`);
 }
 
@@ -90,48 +113,32 @@ async function fetchFromEndpoint(
   limit: number,
   offset: number
 ): Promise<OsmosisTransaction[]> {
-  // Query transactions where address is sender OR receiver
   const [senderResponse, receiverResponse] = await Promise.allSettled([
     fetch(`${endpoint}/cosmos/tx/v1beta1/txs?events=transfer.sender='${address}'&pagination.limit=${limit}&pagination.offset=${offset}&order_by=ORDER_BY_DESC`, {
       method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: { 'Accept': 'application/json' },
     }),
     fetch(`${endpoint}/cosmos/tx/v1beta1/txs?events=transfer.recipient='${address}'&pagination.limit=${limit}&pagination.offset=${offset}&order_by=ORDER_BY_DESC`, {
       method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: { 'Accept': 'application/json' },
     }),
   ]);
 
   let senderTxs: OsmosisTransaction[] = [];
   let receiverTxs: OsmosisTransaction[] = [];
 
-  if (senderResponse.status === 'fulfilled') {
-    if (senderResponse.value.ok) {
-      const data = await senderResponse.value.json();
-      senderTxs = data.tx_responses || [];
-    } else if (senderResponse.value.status === 500) {
-      throw new Error(`Server error (500) from ${endpoint}`);
-    }
-  } else {
-    throw senderResponse.reason;
+  if (senderResponse.status === 'fulfilled' && senderResponse.value.ok) {
+    const data = await senderResponse.value.json();
+    senderTxs = data.tx_responses || [];
   }
 
-  if (receiverResponse.status === 'fulfilled') {
-    if (receiverResponse.value.ok) {
-      const data = await receiverResponse.value.json();
-      receiverTxs = data.tx_responses || [];
-    }
+  if (receiverResponse.status === 'fulfilled' && receiverResponse.value.ok) {
+    const data = await receiverResponse.value.json();
+    receiverTxs = data.tx_responses || [];
   }
 
-  // Combine and deduplicate transactions
   const allTxs = [...senderTxs, ...receiverTxs];
   const uniqueTxs = Array.from(new Map(allTxs.map((tx: OsmosisTransaction) => [tx.txhash, tx])).values());
-
-  // Sort by timestamp descending
   uniqueTxs.sort((a: OsmosisTransaction, b: OsmosisTransaction) => 
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
@@ -141,43 +148,36 @@ async function fetchFromEndpoint(
 
 /**
  * Main transaction fetcher with fallback
- * Tries Mintscan first (most reliable), then falls back to LCD endpoints
  */
 export async function fetchAllTransactions(
   address: string,
   limit: number = 100
 ): Promise<OsmosisTransaction[]> {
-  console.log(`[fetchAllTransactions] Starting fetch for address: ${address}`);
-  console.log(`[fetchAllTransactions] Mintscan API Key available: ${MINTSCAN_API_KEY ? 'YES' : 'NO'}`);
+  console.log(`[fetchAllTransactions] Starting fetch for: ${address}`);
   
-  // Try Mintscan first (it should always work now with hardcoded key)
+  // Try Mintscan first
   try {
-    console.log('[fetchAllTransactions] Attempting to fetch from Mintscan API...');
+    console.log('[fetchAllTransactions] Trying Mintscan API...');
     const mintscanTxs = await fetchTransactionsMintscan(address, limit);
     if (mintscanTxs.length > 0) {
-      console.log(`[fetchAllTransactions] Successfully fetched ${mintscanTxs.length} transactions from Mintscan`);
+      console.log(`[fetchAllTransactions] Mintscan success: ${mintscanTxs.length} txs`);
       return mintscanTxs;
-    } else {
-      console.log('[fetchAllTransactions] Mintscan returned empty result');
     }
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    console.warn(`[fetchAllTransactions] Mintscan API failed: ${errorMsg}`);
-    console.warn('[fetchAllTransactions] Falling back to LCD endpoints...');
+    console.warn('[fetchAllTransactions] Mintscan failed:', error);
   }
   
-  // Fallback to LCD endpoints
+  // Fallback to LCD
   try {
-    console.log('[fetchAllTransactions] Attempting to fetch from LCD endpoints...');
+    console.log('[fetchAllTransactions] Trying LCD endpoints...');
     const lcdTxs = await fetchTransactionsLCD(address, limit);
     if (lcdTxs.length > 0) {
-      console.log(`[fetchAllTransactions] Successfully fetched ${lcdTxs.length} transactions from LCD endpoint`);
+      console.log(`[fetchAllTransactions] LCD success: ${lcdTxs.length} txs`);
       return lcdTxs;
     }
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[fetchAllTransactions] LCD endpoints also failed: ${errorMsg}`);
-    throw new Error(`Failed to fetch transactions. Mintscan error and LCD error: ${errorMsg}`);
+    console.error('[fetchAllTransactions] LCD failed:', error);
+    throw new Error('Failed to fetch transactions from all sources');
   }
   
   return [];
@@ -197,7 +197,6 @@ export function parseTransaction(tx: OsmosisTransaction, walletAddress: string):
   let currency = '';
 
   if (message) {
-    // Determine transaction type and extract details
     if (message['@type']?.includes('MsgSend')) {
       type = message.from_address === walletAddress ? 'send' : 'receive';
       from = message.from_address || '';
@@ -209,7 +208,6 @@ export function parseTransaction(tx: OsmosisTransaction, walletAddress: string):
       }
     } else if (message['@type']?.includes('MsgSwap')) {
       type = 'swap';
-      // Extract swap details from events if available
     } else if (message['@type']?.includes('MsgTransfer')) {
       type = 'ibc_transfer';
       from = message.sender || '';
@@ -222,7 +220,6 @@ export function parseTransaction(tx: OsmosisTransaction, walletAddress: string):
     }
   }
 
-  // Extract fee
   let fee = '';
   let feeCurrency = '';
   if (tx.tx?.auth_info?.fee?.amount && tx.tx.auth_info.fee.amount.length > 0) {
@@ -246,29 +243,16 @@ export function parseTransaction(tx: OsmosisTransaction, walletAddress: string):
   };
 }
 
-/**
- * Format amount from micro units to readable format
- */
 function formatAmount(amount: string): string {
   const num = parseInt(amount, 10);
   if (isNaN(num)) return '0';
-  
-  // Convert from micro (6 decimals) to standard units
   return (num / 1_000_000).toFixed(6);
 }
 
-/**
- * Format denomination from blockchain format to readable
- */
 function formatDenom(denom: string): string {
   if (!denom) return '';
+  if (denom.startsWith('ibc/')) return 'IBC-Token';
   
-  // Handle IBC tokens
-  if (denom.startsWith('ibc/')) {
-    return 'IBC-Token';
-  }
-  
-  // Handle standard denominations
   const denomMap: Record<string, string> = {
     'uosmo': 'OSMO',
     'uatom': 'ATOM',
@@ -280,10 +264,6 @@ function formatDenom(denom: string): string {
   return denomMap[denom] || denom.toUpperCase();
 }
 
-/**
- * Validate Osmosis wallet address
- */
 export function isValidOsmosisAddress(address: string): boolean {
-  // Osmosis addresses start with 'osmo' followed by alphanumeric characters
   return /^osmo[a-z0-9]{39}$/i.test(address);
 }
