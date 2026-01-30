@@ -16,12 +16,20 @@ interface OsmosisTransaction {
   };
 }
 
+interface PaginationInfo {
+  next_key: string | null;
+  total: string;
+}
+
 // Working LCD endpoints
 const LCD_ENDPOINTS = [
   'https://lcd.osmosis.zone',
   'https://osmosis-api.polkachu.com',
   'https://rest-osmosis.blockapsis.com',
 ];
+
+const MAX_TRANSACTIONS = 10000; // Safety limit for tax reporting
+const BATCH_SIZE = 100; // LCD API limit per request
 
 export async function onRequestGet(context: {
   request: Request;
@@ -30,7 +38,7 @@ export async function onRequestGet(context: {
   const { request } = context;
   const url = new URL(request.url);
   const address = url.searchParams.get('address');
-  const limit = parseInt(url.searchParams.get('limit') || '100', 10);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '1000', 10), MAX_TRANSACTIONS);
 
   if (!address) {
     return new Response(
@@ -39,65 +47,89 @@ export async function onRequestGet(context: {
     );
   }
 
+  const allTransactions: OsmosisTransaction[] = [];
+  const metadata = {
+    address,
+    endpoints: [] as string[],
+    totalFetched: 0,
+    senderCount: 0,
+    recipientCount: 0,
+    firstTransactionDate: null as string | null,
+    lastTransactionDate: null as string | null,
+    hasMoreData: false,
+  };
+
   // Try each LCD endpoint
   for (const lcdEndpoint of LCD_ENDPOINTS) {
     try {
-      // CRITICAL FIX: Use 'query=' not 'events='
-      // Format: query=message.sender='ADDRESS'
+      console.log(`[LCD] Fetching from ${lcdEndpoint}...`);
+      
       const senderQuery = `message.sender='${address}'`;
       const recipientQuery = `transfer.recipient='${address}'`;
       
-      const senderUrl = `${lcdEndpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(senderQuery)}&pagination.limit=${limit}&order_by=ORDER_BY_DESC`;
-      const recipientUrl = `${lcdEndpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(recipientQuery)}&pagination.limit=${limit}&order_by=ORDER_BY_DESC`;
+      // Fetch ALL sender transactions with pagination
+      const senderResult = await fetchAllTransactionsWithPagination(
+        lcdEndpoint,
+        senderQuery,
+        limit
+      );
       
-      console.log(`[LCD] ${lcdEndpoint} - Sender: ${senderUrl}`);
+      // Fetch ALL recipient transactions with pagination  
+      const recipientResult = await fetchAllTransactionsWithPagination(
+        lcdEndpoint,
+        recipientQuery,
+        limit
+      );
       
-      const [senderResponse, recipientResponse] = await Promise.all([
-        fetch(senderUrl, { headers: { 'Accept': 'application/json' } }),
-        fetch(recipientUrl, { headers: { 'Accept': 'application/json' } }),
-      ]);
-
-      let senderTxs: OsmosisTransaction[] = [];
-      let recipientTxs: OsmosisTransaction[] = [];
-
-      if (senderResponse.ok) {
-        const data = await senderResponse.json();
-        senderTxs = data.tx_responses || [];
-        console.log(`[LCD] ${lcdEndpoint} - Sender txs: ${senderTxs.length}`);
+      metadata.senderCount = senderResult.transactions.length;
+      metadata.recipientCount = recipientResult.transactions.length;
+      
+      // Combine and deduplicate
+      const combined = [...senderResult.transactions, ...recipientResult.transactions];
+      const uniqueMap = new Map<string, OsmosisTransaction>();
+      
+      for (const tx of combined) {
+        if (!uniqueMap.has(tx.txhash)) {
+          uniqueMap.set(tx.txhash, tx);
+        }
       }
-
-      if (recipientResponse.ok) {
-        const data = await recipientResponse.json();
-        recipientTxs = data.tx_responses || [];
-        console.log(`[LCD] ${lcdEndpoint} - Recipient txs: ${recipientTxs.length}`);
+      
+      const uniqueTxs = Array.from(uniqueMap.values());
+      
+      // Sort by timestamp (newest first)
+      uniqueTxs.sort((a: OsmosisTransaction, b: OsmosisTransaction) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      
+      metadata.totalFetched = uniqueTxs.length;
+      metadata.endpoints.push(lcdEndpoint);
+      
+      if (uniqueTxs.length > 0) {
+        metadata.firstTransactionDate = uniqueTxs[uniqueTxs.length - 1].timestamp;
+        metadata.lastTransactionDate = uniqueTxs[0].timestamp;
+        metadata.hasMoreData = senderResult.hasMore || recipientResult.hasMore;
       }
-
-      // If we got any transactions, return them
-      if (senderTxs.length > 0 || recipientTxs.length > 0) {
-        const allTxs = [...senderTxs, ...recipientTxs];
-        const uniqueTxs = Array.from(
-          new Map(allTxs.map((tx: OsmosisTransaction) => [tx.txhash, tx])).values()
-        );
-
-        uniqueTxs.sort((a: OsmosisTransaction, b: OsmosisTransaction) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
-
-        return new Response(
-          JSON.stringify({
-            transactions: uniqueTxs.slice(0, limit),
-            total: uniqueTxs.length,
-            endpoint: lcdEndpoint,
-          }),
-          {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
+      
+      return new Response(
+        JSON.stringify({
+          transactions: uniqueTxs.slice(0, limit),
+          metadata,
+          verification: {
+            complete: !metadata.hasMoreData,
+            message: metadata.hasMoreData 
+              ? `Showing first ${Math.min(uniqueTxs.length, limit)} of ${metadata.totalFetched}+ transactions. Use higher limit to fetch more.`
+              : `Complete transaction history: ${uniqueTxs.length} transactions from ${metadata.firstTransactionDate?.split('T')[0]} to ${metadata.lastTransactionDate?.split('T')[0]}`,
           }
-        );
-      }
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      );
+      
     } catch (error) {
       console.error(`[LCD] ${lcdEndpoint} error:`, error);
     }
@@ -107,7 +139,7 @@ export async function onRequestGet(context: {
   return new Response(
     JSON.stringify({
       transactions: [],
-      total: 0,
+      metadata,
       error: 'No transactions found from any endpoint',
     }),
     {
@@ -118,6 +150,61 @@ export async function onRequestGet(context: {
       },
     }
   );
+}
+
+async function fetchAllTransactionsWithPagination(
+  endpoint: string,
+  query: string,
+  maxTxs: number
+): Promise<{ transactions: OsmosisTransaction[]; hasMore: boolean; total?: string }> {
+  const transactions: OsmosisTransaction[] = [];
+  let nextKey: string | null = null;
+  let hasMore = false;
+  let totalCount: string = '0';
+  
+  do {
+    const url = nextKey 
+      ? `${endpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(query)}&pagination.key=${encodeURIComponent(nextKey)}&pagination.limit=${BATCH_SIZE}&order_by=ORDER_BY_DESC`
+      : `${endpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(query)}&pagination.limit=${BATCH_SIZE}&order_by=ORDER_BY_DESC`;
+    
+    console.log(`[Pagination] Fetching: ${url.substring(0, 120)}...`);
+    
+    const response = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+    });
+    
+    if (!response.ok) {
+      console.error(`[Pagination] Error ${response.status}: ${await response.text().catch(() => 'Unknown')}`);
+      break;
+    }
+    
+    const data = await response.json();
+    const batch: OsmosisTransaction[] = data.tx_responses || [];
+    const pagination: PaginationInfo = data.pagination || { next_key: null, total: '0' };
+    
+    if (batch.length > 0) {
+      transactions.push(...batch);
+      totalCount = pagination.total;
+      console.log(`[Pagination] Got ${batch.length} txs (total so far: ${transactions.length}/${totalCount})`);
+    }
+    
+    nextKey = pagination.next_key;
+    hasMore = !!nextKey;
+    
+    // Stop if we hit the limit
+    if (transactions.length >= maxTxs) {
+      console.log(`[Pagination] Hit limit of ${maxTxs} transactions`);
+      hasMore = true; // Indicate there might be more
+      break;
+    }
+    
+  } while (nextKey);
+  
+  return { 
+    transactions: transactions.slice(0, maxTxs), 
+    hasMore,
+    total: totalCount 
+  };
 }
 
 export async function onRequestOptions() {

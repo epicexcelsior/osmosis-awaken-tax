@@ -15,12 +15,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [currentAddress, setCurrentAddress] = useState<string>('');
   const [csvFormat, setCsvFormat] = useState<CSVFormat>('standard');
+  const [txMetadata, setTxMetadata] = useState<any>(null);
+  const [txVerification, setTxVerification] = useState<any>(null);
 
   const handleWalletSubmit = async (address: string) => {
     setIsLoading(true);
     setError(null);
     setTransactions([]);
     setRawTransactions([]);
+    setTxMetadata(null);
+    setTxVerification(null);
 
     try {
       // Validate address
@@ -30,12 +34,14 @@ export default function Home() {
 
       setCurrentAddress(address);
 
-      // Fetch transactions
-      const txs = await fetchAllTransactions(address, 100);
-      setRawTransactions(txs);
+      // Fetch transactions (up to 5000 for tax reporting)
+      const result = await fetchAllTransactions(address, 5000);
+      setRawTransactions(result.transactions);
+      setTxMetadata(result.metadata);
+      setTxVerification(result.verification);
 
       // Parse transactions
-      const parsed = txs.map((tx) => parseTransaction(tx, address));
+      const parsed = result.transactions.map((tx) => parseTransaction(tx, address));
       setTransactions(parsed);
 
       if (parsed.length === 0) {
@@ -144,6 +150,35 @@ export default function Home() {
               onDownloadCSV={handleDownloadCSV}
               walletAddress={currentAddress}
             />
+            
+            {/* Transaction Completeness Info */}
+            {txVerification && (
+              <div className={`mt-6 p-4 rounded-lg border ${txVerification.complete ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 ${txVerification.complete ? 'text-green-600' : 'text-yellow-600'}`}>
+                    {txVerification.complete ? '✓' : '⚠'}
+                  </div>
+                  <div className="flex-1">
+                    <h4 className={`font-semibold ${txVerification.complete ? 'text-green-900' : 'text-yellow-900'}`}>
+                      {txVerification.complete ? 'Complete Transaction History' : 'Partial Data'}
+                    </h4>
+                    <p className={`text-sm mt-1 ${txVerification.complete ? 'text-green-800' : 'text-yellow-800'}`}>
+                      {txVerification.message}
+                    </p>
+                    {txMetadata && (
+                      <div className="mt-3 text-sm text-slate-600 space-y-1">
+                        <p><strong>Total Transactions:</strong> {txMetadata.totalFetched?.toLocaleString() || transactions.length}</p>
+                        <p><strong>Sent:</strong> {txMetadata.senderCount?.toLocaleString() || 'N/A'} | <strong>Received:</strong> {txMetadata.recipientCount?.toLocaleString() || 'N/A'}</p>
+                        {txMetadata.firstTransactionDate && (
+                          <p><strong>Date Range:</strong> {new Date(txMetadata.firstTransactionDate).toLocaleDateString()} - {new Date(txMetadata.lastTransactionDate).toLocaleDateString()}</p>
+                        )}
+                        <p><strong>Data Source:</strong> {txMetadata.endpoints?.join(', ') || 'LCD API'}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

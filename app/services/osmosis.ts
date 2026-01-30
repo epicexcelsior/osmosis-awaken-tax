@@ -57,15 +57,9 @@ export async function testLCDEndpoint(address: string = 'osmo1g8gv8ayl55698fscst
  */
 export async function fetchAllTransactions(
   address: string,
-  limit: number = 100
-): Promise<OsmosisTransaction[]> {
+  limit: number = 1000
+): Promise<{ transactions: OsmosisTransaction[]; metadata?: any; verification?: any }> {
   console.log(`[fetchAllTransactions] Fetching via Cloudflare Function for: ${address}`);
-  
-  // For local testing, run LCD test first
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    const testResults = await testLCDEndpoint(address);
-    console.log('[TEST] LCD Test Results:', testResults);
-  }
   
   try {
     // Use the Cloudflare Function endpoint
@@ -82,8 +76,15 @@ export async function fetchAllTransactions(
     }
 
     const data = await response.json();
-    console.log(`[fetchAllTransactions] Response:`, data);
-    return data.transactions || [];
+    console.log(`[fetchAllTransactions] Fetched ${data.transactions?.length} transactions`);
+    console.log(`[fetchAllTransactions] Metadata:`, data.metadata);
+    console.log(`[fetchAllTransactions] Verification:`, data.verification);
+    
+    return { 
+      transactions: data.transactions || [],
+      metadata: data.metadata,
+      verification: data.verification
+    };
   } catch (error) {
     console.error('[fetchAllTransactions] Error:', error);
     throw error;
