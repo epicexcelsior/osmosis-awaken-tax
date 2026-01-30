@@ -1,8 +1,9 @@
 import { OsmosisTransaction, ParsedTransaction, TransactionType } from '../types';
 
+// Mintscan API Configuration
 const MINTSCAN_API_KEY = process.env.NEXT_PUBLIC_MINTSCAN_API_KEY || '';
 
-// Use a CORS proxy for the LCD endpoint or direct public endpoints that support CORS
+// Fallback LCD endpoints if Mintscan fails
 const LCD_ENDPOINTS = [
   'https://lcd.osmosis.zone',
   'https://osmosis-api.polkachu.com',
@@ -10,7 +11,50 @@ const LCD_ENDPOINTS = [
 ];
 
 /**
- * Fetch transactions from Osmosis LCD REST API
+ * Fetch transactions using Mintscan API (Primary method)
+ * This is the most reliable method with proper CORS support
+ */
+export async function fetchTransactionsMintscan(
+  address: string,
+  limit: number = 100,
+  offset: number = 0
+): Promise<OsmosisTransaction[]> {
+  if (!MINTSCAN_API_KEY) {
+    console.warn('Mintscan API key not configured. Set NEXT_PUBLIC_MINTSCAN_API_KEY environment variable.');
+    throw new Error('Mintscan API key required');
+  }
+
+  try {
+    console.log(`Fetching transactions from Mintscan API for address: ${address}`);
+    
+    const response = await fetch(
+      `https://api.mintscan.io/v1/osmosis/accounts/${address}/transactions?limit=${limit}&offset=${offset}`,
+      {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${MINTSCAN_API_KEY}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Mintscan API error: ${response.status}`, errorText);
+      throw new Error(`Mintscan API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`Successfully fetched ${data.data?.length || 0} transactions from Mintscan`);
+    return data.data || [];
+  } catch (error) {
+    console.error('Mintscan fetch error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Fetch transactions from Osmosis LCD REST API (Fallback method)
  * Tries multiple endpoints to find one that works with CORS
  */
 export async function fetchTransactionsLCD(
@@ -95,83 +139,41 @@ async function fetchFromEndpoint(
 }
 
 /**
- * Fetch transactions using Mintscan API
- * Requires API key for production use, but has higher rate limits
- * API Key placeholder: Get yours at https://api.mintscan.io
- */
-export async function fetchTransactionsMintscan(
-  address: string,
-  limit: number = 100,
-  offset: number = 0
-): Promise<OsmosisTransaction[]> {
-  if (!MINTSCAN_API_KEY) {
-    console.warn('Mintscan API key not configured. Set NEXT_PUBLIC_MINTSCAN_API_KEY environment variable.');
-    throw new Error('Mintscan API key required');
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.mintscan.io/v1/osmosis/accounts/${address}/transactions?limit=${limit}&offset=${offset}`,
-      {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${MINTSCAN_API_KEY}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Mintscan API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.data || [];
-  } catch (error) {
-    console.error('Mintscan fetch error:', error);
-    throw error;
-  }
-}
-
-/**
  * Main transaction fetcher with fallback
- * Tries LCD first (free), then falls back to Mintscan if configured
+ * Tries Mintscan first (most reliable), then falls back to LCD endpoints
  */
 export async function fetchAllTransactions(
   address: string,
   limit: number = 100
 ): Promise<OsmosisTransaction[]> {
+  // Try Mintscan first if API key is available
+  if (MINTSCAN_API_KEY) {
+    try {
+      console.log('Attempting to fetch from Mintscan API...');
+      const mintscanTxs = await fetchTransactionsMintscan(address, limit);
+      if (mintscanTxs.length > 0) {
+        console.log(`Successfully fetched ${mintscanTxs.length} transactions from Mintscan`);
+        return mintscanTxs;
+      }
+    } catch (error) {
+      console.warn('Mintscan API failed, falling back to LCD endpoints:', error);
+    }
+  }
+  
+  // Fallback to LCD endpoints
   try {
-    // Try LCD first (free, no API key needed)
+    console.log('Attempting to fetch from LCD endpoints...');
     const lcdTxs = await fetchTransactionsLCD(address, limit);
-    
     if (lcdTxs.length > 0) {
-      console.log(`Fetched ${lcdTxs.length} transactions from LCD endpoint`);
+      console.log(`Successfully fetched ${lcdTxs.length} transactions from LCD endpoint`);
       return lcdTxs;
     }
-
-    // Fallback to Mintscan if LCD returns empty and API key is configured
-    if (MINTSCAN_API_KEY) {
-      console.log('LCD returned empty, trying Mintscan API...');
-      return await fetchTransactionsMintscan(address, limit);
-    }
-
-    return [];
   } catch (error) {
-    console.error('Error fetching transactions:', error);
-    
-    // If LCD fails and we have Mintscan key, try that
-    if (MINTSCAN_API_KEY) {
-      try {
-        return await fetchTransactionsMintscan(address, limit);
-      } catch (mintscanError) {
-        console.error('Mintscan also failed:', mintscanError);
-        throw mintscanError;
-      }
-    }
-    
+    console.error('LCD endpoints also failed:', error);
     throw error;
   }
+  
+  return [];
 }
 
 /**

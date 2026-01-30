@@ -10,10 +10,4 @@ pages_build_output_dir = "dist"
 [vars]
 NEXT_PUBLIC_LCD_ENDPOINT = "https://lcd.osmosis.zone"
 NEXT_PUBLIC_RPC_ENDPOINT = "https://rpc.osmosis.zone"
-# NEXT_PUBLIC_MINTSCAN_API_KEY = "your-api-key-here" # Set this in Cloudflare dashboard
-
-# Production environment
-[env.production]
-[env.production.vars]
-NEXT_PUBLIC_LCD_ENDPOINT = "https://lcd.osmosis.zone"
-NEXT_PUBLIC_RPC_ENDPOINT = "https://rpc.osmosis.zone"
+NEXT_PUBLIC_MINTSCAN_API_KEY = "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTM2NywiaWF0IjoxNzY5ODEzMTMzfQ.fssPTYzAgdlHGlNkypDmMVFV_dY5mHycPtt18ud0N1YakQ_F_d_2CPrS59UUZgW05sbRE-1w-I1o22qh7SKF3g"
