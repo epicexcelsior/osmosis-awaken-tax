@@ -251,6 +251,9 @@ async function fetchWithPagination<T>(
 
 /**
  * Merge ALL transaction types into comprehensive ChainTransaction list
+ * 
+ * IMPORTANT: For cost basis accuracy, each token transfer becomes its own transaction row,
+ * even if multiple transfers share the same transaction hash.
  */
 function mergeAllTransactions(
   regularTransactions: EtherscanTransaction[],
@@ -260,59 +263,31 @@ function mergeAllTransactions(
   erc1155Transfers: EtherscanERC1155Transfer[]
 ): ChainTransaction[] {
   const chainTransactions: ChainTransaction[] = [];
-  const processedHashes = new Set<string>();
 
-  // Group all transfers by transaction hash for merging
-  const transfersByHash = new Map<string, TransferGroup>();
-  
-  // Group ERC20 transfers
-  tokenTransfers.forEach(transfer => {
-    if (!transfersByHash.has(transfer.hash)) {
-      transfersByHash.set(transfer.hash, { erc20: [], nft: [], erc1155: [] });
-    }
-    transfersByHash.get(transfer.hash)!.erc20.push(transfer);
-  });
-
-  // Group NFT transfers
-  nftTransfers.forEach(transfer => {
-    if (!transfersByHash.has(transfer.hash)) {
-      transfersByHash.set(transfer.hash, { erc20: [], nft: [], erc1155: [] });
-    }
-    transfersByHash.get(transfer.hash)!.nft.push(transfer);
-  });
-
-  // Group ERC1155 transfers
-  erc1155Transfers.forEach(transfer => {
-    if (!transfersByHash.has(transfer.hash)) {
-      transfersByHash.set(transfer.hash, { erc20: [], nft: [], erc1155: [] });
-    }
-    transfersByHash.get(transfer.hash)!.erc1155.push(transfer);
-  });
-
-  // Convert regular transactions
+  // Convert regular transactions (these capture native CELO transfers and contract calls)
   regularTransactions.forEach(tx => {
-    const transfers = transfersByHash.get(tx.hash);
-    chainTransactions.push(convertRegularTransaction(tx, transfers));
-    processedHashes.add(tx.hash);
+    chainTransactions.push(convertRegularTransaction(tx));
   });
 
-  // Convert internal transactions (these might not have matching regular transactions)
+  // Convert internal transactions
   internalTransactions.forEach(tx => {
-    if (!processedHashes.has(tx.hash)) {
-      chainTransactions.push(convertInternalTransaction(tx));
-      processedHashes.add(tx.hash);
-    }
+    chainTransactions.push(convertInternalTransaction(tx));
   });
 
-  // Add orphaned transfers (transfers without matching regular transactions)
-  transfersByHash.forEach((transfers, hash) => {
-    if (!processedHashes.has(hash)) {
-      // Find a representative transfer to get timestamp/block info
-      const representative = transfers.erc20[0] || transfers.nft[0] || transfers.erc1155[0];
-      if (representative) {
-        chainTransactions.push(convertTransferToChainTransaction(hash, representative, transfers));
-      }
-    }
+  // Convert EACH ERC20 token transfer as its own transaction
+  // This ensures every token movement appears as a separate row in the CSV
+  tokenTransfers.forEach(transfer => {
+    chainTransactions.push(convertERC20TransferToChainTransaction(transfer));
+  });
+
+  // Convert EACH NFT transfer as its own transaction
+  nftTransfers.forEach(transfer => {
+    chainTransactions.push(convertNFTTransferToChainTransaction(transfer));
+  });
+
+  // Convert EACH ERC1155 transfer as its own transaction
+  erc1155Transfers.forEach(transfer => {
+    chainTransactions.push(convertERC1155TransferToChainTransaction(transfer));
   });
 
   return chainTransactions;
@@ -321,88 +296,8 @@ function mergeAllTransactions(
 /**
  * Convert regular Etherscan transaction to ChainTransaction
  */
-function convertRegularTransaction(
-  tx: EtherscanTransaction,
-  transfers?: TransferGroup
-): ChainTransaction {
+function convertRegularTransaction(tx: EtherscanTransaction): ChainTransaction {
   const fee = (BigInt(tx.gasUsed || 0) * BigInt(tx.gasPrice || 0)).toString();
-
-  // Build token events from all transfer types
-  const tokenEvents: TxEvent[] = [];
-  
-  if (transfers) {
-    // ERC20 transfers
-    transfers.erc20.forEach((transfer, idx) => {
-      const metadata = getTokenMetadata(
-        transfer.contractAddress,
-        transfer.tokenSymbol,
-        transfer.tokenName,
-        transfer.tokenDecimal
-      );
-
-      tokenEvents.push({
-        type: "token_transfer",
-        attributes: [
-          { key: "sender_address", value: transfer.contractAddress },
-          { key: "token_symbol", value: metadata.symbol },
-          { key: "token_name", value: metadata.name },
-          { key: "decimals", value: String(metadata.decimals) },
-          { key: "value", value: transfer.value },
-          { key: "from", value: transfer.from },
-          { key: "to", value: transfer.to },
-          { key: "token_type", value: "ERC20" },
-        ],
-      });
-    });
-
-    // NFT transfers
-    transfers.nft.forEach((transfer, idx) => {
-      const metadata = getTokenMetadata(
-        transfer.contractAddress,
-        transfer.tokenSymbol,
-        transfer.tokenName,
-        "0"
-      );
-
-      tokenEvents.push({
-        type: "nft_transfer",
-        attributes: [
-          { key: "sender_address", value: transfer.contractAddress },
-          { key: "token_symbol", value: metadata.symbol },
-          { key: "token_name", value: metadata.name },
-          { key: "token_id", value: transfer.tokenID },
-          { key: "from", value: transfer.from },
-          { key: "to", value: transfer.to },
-          { key: "token_type", value: "ERC721" },
-        ],
-      });
-    });
-
-    // ERC1155 transfers
-    transfers.erc1155.forEach((transfer, idx) => {
-      const metadata = getTokenMetadata(
-        transfer.contractAddress,
-        transfer.tokenSymbol,
-        transfer.tokenName,
-        transfer.tokenDecimal
-      );
-
-      tokenEvents.push({
-        type: "erc1155_transfer",
-        attributes: [
-          { key: "sender_address", value: transfer.contractAddress },
-          { key: "token_symbol", value: metadata.symbol },
-          { key: "token_name", value: metadata.name },
-          { key: "decimals", value: String(metadata.decimals) },
-          { key: "value", value: transfer.tokenValue },
-          { key: "token_id", value: transfer.tokenID },
-          { key: "from", value: transfer.from },
-          { key: "to", value: transfer.to },
-          { key: "token_type", value: "ERC1155" },
-        ],
-      });
-    });
-  }
 
   return {
     hash: tx.hash,
@@ -410,11 +305,6 @@ function convertRegularTransaction(
     timestamp: new Date(parseInt(tx.timeStamp) * 1000).toISOString(),
     code: tx.isError === "1" ? 1 : 0,
     chain: CHAIN_ID,
-    logs: tokenEvents.length > 0 ? [{
-      msg_index: 0,
-      log: "Token transfers",
-      events: tokenEvents,
-    }] : undefined,
     tx: {
       body: {
         messages: [
@@ -607,6 +497,189 @@ function convertTransferToChainTransaction(
           },
         ],
         memo: "Token transfer",
+      },
+      auth_info: {
+        fee: {
+          amount: [],
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Convert ERC20 token transfer to ChainTransaction
+ * Each transfer becomes its own transaction for cost basis tracking
+ */
+function convertERC20TransferToChainTransaction(transfer: EtherscanTokenTransfer): ChainTransaction {
+  const metadata = getTokenMetadata(
+    transfer.contractAddress,
+    transfer.tokenSymbol,
+    transfer.tokenName,
+    transfer.tokenDecimal
+  );
+
+  return {
+    hash: transfer.hash,
+    height: transfer.blockNumber,
+    timestamp: new Date(parseInt(transfer.timeStamp) * 1000).toISOString(),
+    code: 0,
+    chain: CHAIN_ID,
+    logs: [{
+      msg_index: 0,
+      log: "ERC20 token transfer",
+      events: [{
+        type: "token_transfer",
+        attributes: [
+          { key: "sender_address", value: transfer.contractAddress },
+          { key: "token_symbol", value: metadata.symbol },
+          { key: "token_name", value: metadata.name },
+          { key: "decimals", value: String(metadata.decimals) },
+          { key: "value", value: transfer.value },
+          { key: "from", value: transfer.from },
+          { key: "to", value: transfer.to },
+          { key: "token_type", value: "ERC20" },
+        ],
+      }],
+    }],
+    tx: {
+      body: {
+        messages: [
+          {
+            "@type": "/cosmos.bank.v1beta1.MsgSend",
+            from_address: transfer.from,
+            to_address: transfer.to,
+            amount: [
+              {
+                amount: transfer.value,
+                denom: metadata.symbol,
+              },
+            ],
+          },
+        ],
+        memo: `ERC20 transfer: ${metadata.symbol}`,
+      },
+      auth_info: {
+        fee: {
+          amount: [],
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Convert NFT (ERC721) transfer to ChainTransaction
+ * Each NFT transfer becomes its own transaction
+ */
+function convertNFTTransferToChainTransaction(transfer: EtherscanNFTTransfer): ChainTransaction {
+  const metadata = getTokenMetadata(
+    transfer.contractAddress,
+    transfer.tokenSymbol,
+    transfer.tokenName,
+    "0"
+  );
+
+  return {
+    hash: transfer.hash,
+    height: transfer.blockNumber,
+    timestamp: new Date(parseInt(transfer.timeStamp) * 1000).toISOString(),
+    code: 0,
+    chain: CHAIN_ID,
+    logs: [{
+      msg_index: 0,
+      log: "NFT transfer",
+      events: [{
+        type: "nft_transfer",
+        attributes: [
+          { key: "sender_address", value: transfer.contractAddress },
+          { key: "token_symbol", value: metadata.symbol },
+          { key: "token_name", value: metadata.name },
+          { key: "token_id", value: transfer.tokenID },
+          { key: "from", value: transfer.from },
+          { key: "to", value: transfer.to },
+          { key: "token_type", value: "ERC721" },
+        ],
+      }],
+    }],
+    tx: {
+      body: {
+        messages: [
+          {
+            "@type": "/cosmos.bank.v1beta1.MsgSend",
+            from_address: transfer.from,
+            to_address: transfer.to,
+            amount: [
+              {
+                amount: "1",
+                denom: `${metadata.symbol}#${transfer.tokenID}`,
+              },
+            ],
+          },
+        ],
+        memo: `NFT transfer: ${metadata.symbol} #${transfer.tokenID}`,
+      },
+      auth_info: {
+        fee: {
+          amount: [],
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Convert ERC1155 token transfer to ChainTransaction
+ * Each ERC1155 transfer becomes its own transaction
+ */
+function convertERC1155TransferToChainTransaction(transfer: EtherscanERC1155Transfer): ChainTransaction {
+  const metadata = getTokenMetadata(
+    transfer.contractAddress,
+    transfer.tokenSymbol,
+    transfer.tokenName,
+    transfer.tokenDecimal
+  );
+
+  return {
+    hash: transfer.hash,
+    height: transfer.blockNumber,
+    timestamp: new Date(parseInt(transfer.timeStamp) * 1000).toISOString(),
+    code: 0,
+    chain: CHAIN_ID,
+    logs: [{
+      msg_index: 0,
+      log: "ERC1155 token transfer",
+      events: [{
+        type: "erc1155_transfer",
+        attributes: [
+          { key: "sender_address", value: transfer.contractAddress },
+          { key: "token_symbol", value: metadata.symbol },
+          { key: "token_name", value: metadata.name },
+          { key: "decimals", value: String(metadata.decimals) },
+          { key: "value", value: transfer.tokenValue },
+          { key: "token_id", value: transfer.tokenID },
+          { key: "from", value: transfer.from },
+          { key: "to", value: transfer.to },
+          { key: "token_type", value: "ERC1155" },
+        ],
+      }],
+    }],
+    tx: {
+      body: {
+        messages: [
+          {
+            "@type": "/cosmos.bank.v1beta1.MsgSend",
+            from_address: transfer.from,
+            to_address: transfer.to,
+            amount: [
+              {
+                amount: transfer.tokenValue,
+                denom: `${metadata.symbol}#${transfer.tokenID}`,
+              },
+            ],
+          },
+        ],
+        memo: `ERC1155 transfer: ${metadata.symbol} #${transfer.tokenID}`,
       },
       auth_info: {
         fee: {
