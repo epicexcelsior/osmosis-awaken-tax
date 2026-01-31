@@ -18,7 +18,7 @@ Build a general-purpose dashboard for viewing wallet transaction history across 
 
 | Chain         | Status           | API Used                  | Notes                                      |
 | ------------- | ---------------- | ------------------------- | ------------------------------------------ |
-| **Celo**      | ✅ **Working**   | Etherscan v2 API          | 100% cost basis, 5,000+ tx tested          |
+| **Celo**      | ✅ **Working**   | Etherscan v2 API          | All 5 endpoints: txlist, internal, ERC20, ERC721, ERC1155 |
 | **Fantom**    | ⚠️ Deprecated    | Tatum API                 | Limited to 50 txs, needs migration         |
 | **Osmosis**   | ❌ Partial       | LCD API                   | Only returns ~1-4 transactions             |
 | **Babylon**   | ❌ Failing       | REST API                  | 500 errors from AllThatNode                |
