@@ -692,6 +692,167 @@ Different APIs have different attribution requirements:
 
 ---
 
+## Static Export Deployment Guide
+
+### What is Static Export?
+
+Next.js `output: 'export'` generates fully static HTML/CSS/JS files that can be deployed to any static hosting platform (Cloudflare Pages, Netlify, Vercel, etc.). No server-side code runs.
+
+### What Breaks in Static Exports?
+
+#### ❌ Dynamic Routes with Client Components
+```typescript
+// app/transactions/[chain]/page.tsx
+// This WON'T WORK with client components + static export!
+export default function Page({ params }: { params: { chain: string } }) {
+  return <ClientComponent chainId={params.chain} />  // chainId will be undefined!
+}
+```
+
+**Why:** Params are populated server-side. In static export, there's no server to populate them.
+
+#### ❌ useSearchParams() and usePathname()
+```typescript
+// This causes RSC payload 404 errors!
+import { useSearchParams } from 'next/navigation'
+const searchParams = useSearchParams()  // Fetches non-existent .txt files
+```
+
+**Why:** These hooks try to fetch React Server Component payloads that don't exist in static builds.
+
+#### ❌ Server-Side Data Fetching
+```typescript
+// This won't work in static export!
+export async function generateStaticParams() {
+  // Server code that runs at build time only
+}
+
+export default async function Page() {
+  const data = await fetchData()  // Can't do this in client component!
+  return <div>{data}</div>
+}
+```
+
+### What Works in Static Exports?
+
+#### ✅ Single-Page Application (SPA) Pattern
+```typescript
+// app/page.tsx
+'use client'
+
+export default function Home() {
+  const [selectedChain, setSelectedChain] = useState('celo')
+  const [address, setAddress] = useState('')
+  const [showResults, setShowResults] = useState(false)
+  
+  // All functionality on one page
+  if (showResults) {
+    return <ResultsView />
+  }
+  
+  return <InputView />
+}
+```
+
+#### ✅ Static Routes Only
+```typescript
+// app/about/page.tsx - Works fine!
+export default function About() {
+  return <div>About page</div>
+}
+```
+
+#### ✅ Client-Side URL Reading
+```typescript
+// Safe way to read URL in static export
+useEffect(() => {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash
+    const params = new URLSearchParams(window.location.search)
+    // Process URL client-side only
+  }
+}, [])
+```
+
+### Recommended Architecture for Static Exports
+
+```
+app/
+├── page.tsx              # Main page with all functionality
+├── layout.tsx            # Root layout
+├── globals.css           # Styles
+└── services/             # API clients
+    ├── celo-client.ts
+    ├── ronin-client.ts
+    └── ...
+```
+
+**Key Principles:**
+1. One main page with state-based view switching
+2. No dynamic routes `[param]` for client components
+3. All data fetching happens client-side in useEffect
+4. Use window.location for URL reading (not Next.js hooks)
+5. Test with `npm run build` and `npx serve dist` locally
+
+### Testing Static Exports Locally
+
+```bash
+# Build for production
+npm run build
+
+# Serve the dist folder locally
+npx serve dist
+
+# Or use Python
+python -m http.server 3000 -d dist
+
+# Test all functionality before deploying!
+```
+
+**Common Gotchas:**
+- Links without `prefetch={false}` may cause issues
+- Images need `unoptimized: true` in next.config.js
+- API routes won't work (they need server)
+- Middleware won't work
+- Rewrites/redirects need platform-specific config (e.g., Cloudflare _redirects file)
+
+---
+
+## Deployment Checklist
+
+### Before Deploying:
+- [ ] Run `npm run build` locally - check for errors
+- [ ] Serve `dist` folder locally and test all functionality
+- [ ] Verify no console errors in browser
+- [ ] Check that all images/icons load correctly
+- [ ] Test CSV download functionality
+- [ ] Verify all API calls work (CORS ok)
+- [ ] Test with real wallet addresses
+
+### Platform-Specific Notes:
+
+**Cloudflare Pages:**
+- Use `_redirects` file for SPA routing
+- Set `output: 'export'` and `distDir: 'dist'` in next.config.js
+- Images must be unoptimized
+- No serverless functions
+
+**Netlify:**
+- Use `_redirects` or `netlify.toml` for routing
+- Similar constraints as Cloudflare
+
+**Vercel:**
+- Can use serverless functions if not using static export
+- Static export has same constraints as above
+
+---
+
+*Last Updated: 2026-01-31*
+*Document Version: 1.1*
+*Author: Development Team*
+
+---
+
 *Last Updated: 2026-01-31*
 *Document Version: 1.0*
 *Author: Development Team*

@@ -477,7 +477,57 @@ Data provided by Etherscan.io API. See https://etherscan.io/apis for more inform
 
 ---
 
+### 8. Static Export Deployment Challenges
+
+**Major Issue Discovered**: Dynamic routes with `[chain]` and Next.js static exports don't work well together with client components.
+
+**Problem Details:**
+- Attempted to create `/transactions/[chain]` dynamic routes for separate chain pages
+- Client components in dynamic routes couldn't receive `params` in static export mode
+- Got `chainId: "$undefined"` in HTML output
+- All transaction pages showed "Chain Not Found" error
+- `useSearchParams()` caused RSC (React Server Component) payload 404 errors
+
+**Failed Approaches:**
+1. Dynamic route `[chain]` with params → Params don't reach client components in static export
+2. `useSearchParams()` hook → Causes RSC payload fetch errors (404 on `__next.transactions.$d$chain.txt`)
+3. Suspense wrapper → Still had hydration issues
+4. Extracting chain from URL path → Worked locally but not in production build
+
+**Root Cause:**
+Next.js static export (`output: 'export'`) generates fully static HTML. Dynamic routes with params need server-side rendering to populate params, but Cloudflare Pages only serves static files.
+
+**Solution:**
+Reverted to single-page design where all functionality lives on home page:
+- Chain selection via state (not URL params)
+- Results view toggled via state
+- Address input on same page
+- No dynamic routes needed
+
+**Key Lesson:**
+For static exports on platforms like Cloudflare Pages:
+- ❌ Don't use dynamic routes `[param]` with client components
+- ❌ Don't use `useSearchParams()` or `usePathname()` from `next/navigation`
+- ✅ Keep everything on single page with state management
+- ✅ Use hash-based routing if URL state is needed
+- ✅ Test thoroughly in production build, not just dev
+
+**Files Affected:**
+- Removed: `app/transactions/[chain]/page.tsx`
+- Removed: `app/transactions/[chain]/TransactionsClient.tsx`
+- Modified: `app/page.tsx` - Single page with all functionality
+
+---
+
 ## Version History
+
+### 2026-01-31 - UI Redesign and Deployment Fix
+- Attempted dynamic route redesign with `/transactions/[chain]` pages
+- Encountered static export compatibility issues with Next.js dynamic routes
+- Reverted to single-page design that works with static exports
+- Maintained dark gray (#1a1a1a) + orange (#f97316) theme
+- Added chain icons for all 7 supported blockchains
+- Verified working deployment on Cloudflare Pages
 
 ### 2026-01-31 - Celo Migration to Etherscan v2 API
 - **MAJOR UPDATE**: Migrated Celo from deprecated Tatum API to Etherscan v2 API
