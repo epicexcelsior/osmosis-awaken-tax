@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, Download, Loader2 } from 'lucide-react';
 import {
   fetchAllTransactionsClientSide as fetchCeloTransactions,
@@ -36,6 +35,7 @@ const chains = [
     fetch: fetchCeloTransactions,
     parse: parseCeloTransaction,
     isValid: isValidCeloAddress,
+    placeholder: '0x...'
   },
   { 
     id: 'ronin', 
@@ -45,6 +45,7 @@ const chains = [
     fetch: fetchRoninTransactions,
     parse: parseRoninTransaction,
     isValid: isValidRoninAddress,
+    placeholder: '0x...'
   },
   { 
     id: 'celestia', 
@@ -54,43 +55,48 @@ const chains = [
     fetch: fetchCelestiaTransactions,
     parse: parseCelestiaTransaction,
     isValid: isValidCelestiaAddress,
+    placeholder: 'celestia...'
   },
-  // Add other chains as they are implemented
+  // Placeholder chains
   { 
     id: 'osmosis', 
     name: 'Osmosis', 
     description: 'Cosmos DEX and DeFi hub', 
     color: '#9D4EDD',
-    fetch: fetchCeloTransactions, // Placeholder
+    fetch: fetchCeloTransactions,
     parse: parseCeloTransaction,
     isValid: (addr: string) => addr.startsWith('osmo'),
+    placeholder: 'osmo...'
   },
   { 
     id: 'near', 
     name: 'NEAR Protocol', 
     description: 'Scalable L1 blockchain', 
     color: '#00C08B',
-    fetch: fetchCeloTransactions, // Placeholder
+    fetch: fetchCeloTransactions,
     parse: parseCeloTransaction,
     isValid: () => true,
+    placeholder: 'alice.near'
   },
   { 
     id: 'fantom', 
     name: 'Fantom', 
     description: 'High-performance EVM chain', 
     color: '#1969FF',
-    fetch: fetchCeloTransactions, // Placeholder
+    fetch: fetchCeloTransactions,
     parse: parseCeloTransaction,
     isValid: (addr: string) => addr.startsWith('0x'),
+    placeholder: '0x...'
   },
   { 
     id: 'babylon', 
     name: 'Babylon', 
     description: 'Bitcoin staking protocol on Cosmos', 
     color: '#CE6533',
-    fetch: fetchCeloTransactions, // Placeholder
+    fetch: fetchCeloTransactions,
     parse: parseCeloTransaction,
     isValid: (addr: string) => addr.startsWith('bbn'),
+    placeholder: 'bbn...'
   },
 ];
 
@@ -99,22 +105,33 @@ interface TransactionsClientProps {
 }
 
 export default function TransactionsClient({ chainId }: TransactionsClientProps) {
-  const searchParams = useSearchParams();
   const [address, setAddress] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<any>(null);
+  const [actualChainId, setActualChainId] = useState(chainId);
   
-  const chain = chains.find(c => c.id === chainId);
-
-  // Read address from URL query params
+  // In static exports, params might not work, so read from URL
   useEffect(() => {
-    const addressFromUrl = searchParams.get('address');
-    if (addressFromUrl) {
-      setAddress(addressFromUrl);
+    if (typeof window !== 'undefined') {
+      // Extract chain from URL path: /transactions/CHAIN
+      const pathParts = window.location.pathname.split('/');
+      const chainFromUrl = pathParts[pathParts.length - 1];
+      if (chainFromUrl && chainFromUrl !== '[chain]') {
+        setActualChainId(chainFromUrl);
+      }
+      
+      // Read address from query params
+      const params = new URLSearchParams(window.location.search);
+      const addressFromUrl = params.get('address');
+      if (addressFromUrl) {
+        setAddress(addressFromUrl);
+      }
     }
-  }, [searchParams]);
+  }, []);
+  
+  const chain = chains.find(c => c.id === actualChainId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,7 +144,7 @@ export default function TransactionsClient({ chainId }: TransactionsClientProps)
     try {
       // Validate address
       if (!chain.isValid(address.trim())) {
-        throw new Error(`Invalid ${chain.name} address format`);
+        throw new Error(`Invalid ${chain.name} address format. Expected: ${chain.placeholder}`);
       }
 
       // Fetch transactions with progress callback
@@ -140,7 +157,7 @@ export default function TransactionsClient({ chainId }: TransactionsClientProps)
 
       setMetadata(result.metadata);
 
-      // Parse transactions - handle different return types
+      // Parse transactions
       const parsed = result.transactions.map((tx: any) =>
         chain.parse(tx, address.trim())
       );
@@ -207,7 +224,7 @@ export default function TransactionsClient({ chainId }: TransactionsClientProps)
                   type="text"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder={`Enter ${chain.name} address...`}
+                  placeholder={`${chain.name} address (${chain.placeholder})`}
                   className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
                 <button
