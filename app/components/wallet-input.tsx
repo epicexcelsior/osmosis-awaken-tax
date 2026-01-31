@@ -1,57 +1,102 @@
-import { useState } from 'react';
-import { Search, AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+"use client";
+
+import { useState } from "react";
+import { Search, AlertCircle, ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ChainId } from "../types";
+import { CHAIN_CONFIGS, ENABLED_CHAINS } from "../config/chains";
 
 interface WalletInputProps {
   onSubmit: (address: string) => void;
   isLoading: boolean;
+  selectedChain: ChainId;
+  onChainChange: (chain: ChainId) => void;
 }
 
-export function WalletInput({ onSubmit, isLoading }: WalletInputProps) {
-  const [address, setAddress] = useState('');
+export function WalletInput({
+  onSubmit,
+  isLoading,
+  selectedChain,
+  onChainChange,
+}: WalletInputProps) {
+  const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const chainConfig = CHAIN_CONFIGS[selectedChain];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Basic validation
     if (!address.trim()) {
-      setError('Please enter a wallet address');
+      setError("Please enter a wallet address");
       return;
     }
 
-    // Validate Osmosis address format
-    if (!isValidOsmosisAddress(address.trim())) {
-      setError('Invalid Osmosis address. Address should start with "osmo" followed by 39 characters');
+    // Validate address format based on selected chain
+    if (!chainConfig.addressRegex.test(address.trim())) {
+      setError(
+        `Invalid ${chainConfig.displayName} address. Should start with "${chainConfig.addressPrefix}"`,
+      );
       return;
     }
 
     onSubmit(address.trim());
   };
 
-  const isValidOsmosisAddress = (addr: string): boolean => {
-    return /^osmo[a-z0-9]{39}$/i.test(addr);
-  };
-
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle className="text-2xl font-bold text-center">
-          Osmosis Transaction Viewer
+          Multi-Chain Transaction Viewer
         </CardTitle>
         <CardDescription className="text-center">
-          Enter your Osmosis wallet address to view transactions and export to Awaken Tax CSV format
+          View transactions and export to Awaken Tax CSV format
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Chain Selector */}
+          <div className="flex gap-2 justify-center flex-wrap">
+            {ENABLED_CHAINS.map((chain) => (
+              <button
+                key={chain.id}
+                type="button"
+                onClick={() => {
+                  onChainChange(chain.id);
+                  setAddress("");
+                  setError(null);
+                }}
+                className={`px-4 py-2 rounded-lg font-medium transition-all border-2 ${
+                  selectedChain === chain.id
+                    ? "border-current shadow-lg"
+                    : "border-transparent hover:border-gray-300 dark:hover:border-gray-600"
+                }`}
+                style={{
+                  backgroundColor:
+                    selectedChain === chain.id
+                      ? chain.color + "20"
+                      : "transparent",
+                  color: selectedChain === chain.id ? chain.color : "inherit",
+                }}
+              >
+                {chain.displayName}
+              </button>
+            ))}
+          </div>
+
           <div className="relative">
             <Input
-              placeholder="osmo1..."
+              placeholder={`${chainConfig.addressPrefix}...`}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               className="pr-12 h-14 text-lg"
@@ -71,6 +116,9 @@ export function WalletInput({ onSubmit, isLoading }: WalletInputProps) {
             type="submit"
             className="w-full h-12 text-lg font-semibold"
             disabled={isLoading}
+            style={{
+              background: `linear-gradient(135deg, ${chainConfig.gradientFrom}, ${chainConfig.gradientTo})`,
+            }}
           >
             {isLoading ? (
               <>
@@ -80,17 +128,15 @@ export function WalletInput({ onSubmit, isLoading }: WalletInputProps) {
             ) : (
               <>
                 <Search className="mr-2 h-5 w-5" />
-                View Transactions
+                View {chainConfig.displayName} Transactions
               </>
             )}
           </Button>
         </form>
 
         <div className="mt-6 text-sm text-muted-foreground text-center">
-          <p>Example: osmo1fl48vsnmsdzcv85q5d2q4z5ajdha8yu3aq6l09</p>
-          <p className="mt-2">
-            Data source: Osmosis LCD API (free) or Mintscan API (optional API key)
-          </p>
+          <p>Example: {chainConfig.testAddress.slice(0, 20)}...</p>
+          <p className="mt-2">{chainConfig.description}</p>
         </div>
       </CardContent>
     </Card>

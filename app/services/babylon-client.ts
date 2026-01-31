@@ -1,86 +1,57 @@
 import {
-  OsmosisTransaction,
+  ChainTransaction,
   ParsedTransaction,
   TransactionType,
   ChainId,
 } from "../types";
+import { getChainConfig } from "../config/chains";
 
-const CHAIN_ID: ChainId = "osmosis";
+const CHAIN_ID: ChainId = "babylon";
 
 /**
- * Client-side transaction fetcher with improved pagination
- * Fetches ALL transactions without arbitrary page limits
+ * Fetch ALL transactions from Babylon using AllThatNode REST API
+ * Uses the same pattern as Osmosis - LCD/REST API with pagination
  */
 export async function fetchAllTransactionsClientSide(
   address: string,
-  onProgress?: (count: number, total: number) => void,
-): Promise<{ transactions: OsmosisTransaction[]; metadata: any }> {
-  console.log(`[Osmosis] Starting comprehensive fetch for ${address}`);
+  onProgress?: (count: number, query: string, page: number) => void,
+): Promise<{ transactions: ChainTransaction[]; metadata: any }> {
+  console.log(`[Babylon] Starting comprehensive fetch for ${address}`);
 
-  const allTransactions = new Map<string, OsmosisTransaction>();
-  const LCD_ENDPOINTS = [
-    "https://lcd.osmosis.zone",
-    "https://osmosis-api.polkachu.com",
-    "https://rest-osmosis.blockapsis.com",
-  ];
+  const config = getChainConfig(CHAIN_ID);
+  const allTransactions = new Map<string, ChainTransaction>();
 
-  // Query types to catch all transaction types
+  // Use REST API endpoints (LCD style)
+  const restEndpoints = config.apiEndpoints;
+
+  // Query patterns for Babylon (Cosmos SDK based)
   const queryTypes = [
     { name: "message.sender", query: `message.sender='${address}'` },
     { name: "transfer.recipient", query: `transfer.recipient='${address}'` },
     { name: "transfer.sender", query: `transfer.sender='${address}'` },
-    { name: "ibc_transfer.sender", query: `ibc_transfer.sender='${address}'` },
     {
       name: "ibc_transfer.receiver",
       query: `ibc_transfer.receiver='${address}'`,
     },
+    { name: "ibc_transfer.sender", query: `ibc_transfer.sender='${address}'` },
     {
       name: "delegate.delegator",
       query: `delegate.delegator_address='${address}'`,
     },
     {
-      name: "begin_redelegate",
-      query: `begin_redelegate.delegator_address='${address}'`,
-    },
-    {
-      name: "begin_unbonding",
-      query: `begin_unbonding.delegator_address='${address}'`,
-    },
-    {
       name: "withdraw_rewards",
       query: `withdraw_rewards.delegator_address='${address}'`,
     },
-    {
-      name: "set_withdraw_address",
-      query: `set_withdraw_address.delegator_address='${address}'`,
-    },
-    {
-      name: "swap_exact_amount_in",
-      query: `swap_exact_amount_in.sender='${address}'`,
-    },
-    {
-      name: "swap_exact_amount_out",
-      query: `swap_exact_amount_out.sender='${address}'`,
-    },
-    { name: "join_pool", query: `join_pool.sender='${address}'` },
-    { name: "exit_pool", query: `exit_pool.sender='${address}'` },
-    { name: "lock_tokens", query: `lock_tokens.owner='${address}'` },
-    { name: "begin_unlocking", query: `begin_unlocking.owner='${address}'` },
-    { name: "vote", query: `vote.voter='${address}'` },
-    { name: "submit_proposal", query: `submit_proposal.proposer='${address}'` },
-    { name: "deposit", query: `deposit.depositor='${address}'` },
-    { name: "send", query: `send.from_address='${address}'` },
-    { name: "create_denom", query: `create_denom.sender='${address}'` },
-    { name: "mint", query: `mint.sender='${address}'` },
-    { name: "burn", query: `burn.sender='${address}'` },
+    { name: "send.from_address", query: `send.from_address='${address}'` },
+    { name: "vote.voter", query: `vote.voter='${address}'` },
   ];
 
   let lastSuccessfulEndpoint = "";
   let queriesWithData: string[] = [];
 
-  // Try each endpoint
-  for (const endpoint of LCD_ENDPOINTS) {
-    console.log(`[Osmosis] Trying LCD: ${endpoint}`);
+  // Try each REST endpoint
+  for (const endpoint of restEndpoints) {
+    console.log(`[Babylon] Trying REST API: ${endpoint}`);
     let endpointSuccess = false;
 
     for (const queryType of queryTypes) {
@@ -90,46 +61,55 @@ export async function fetchAllTransactionsClientSide(
       let pagesFetched = 0;
       let consecutiveErrors = 0;
 
-      // NO page limit - fetch until we get all data
       while (hasMore) {
         try {
           const url = `${endpoint}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(queryType.query)}&pagination.offset=${offset}&pagination.limit=100&order_by=ORDER_BY_DESC`;
 
           if (pagesFetched === 0) {
-            console.log(`[Osmosis] ${queryType.name} - starting fetch...`);
+            console.log(`[Babylon] ${queryType.name} - starting fetch...`);
           }
 
           const response = await fetch(url, {
-            headers: { Accept: "application/json" },
+            headers: {
+              Accept: "application/json",
+            },
           });
 
           if (!response.ok) {
             consecutiveErrors++;
             if (response.status === 500 || consecutiveErrors >= 3) {
               console.log(
-                `[Osmosis] ${queryType.name} - Error at offset ${offset}, stopping`,
+                `[Babylon] ${queryType.name} - Error at offset ${offset}`,
               );
               break;
             }
-            // Retry with delay
             await new Promise((resolve) => setTimeout(resolve, 500));
             continue;
           }
 
           consecutiveErrors = 0;
           const data: any = await response.json();
-          const batch: OsmosisTransaction[] = data.tx_responses || [];
+          const batch = data.tx_responses || [];
 
           if (batch.length === 0) {
             hasMore = false;
             break;
           }
 
-          // Add transactions to map (deduplication by hash)
+          // Add transactions (convert to ChainTransaction format)
           let newTxCount = 0;
           for (const tx of batch) {
             if (tx.txhash && !allTransactions.has(tx.txhash)) {
-              allTransactions.set(tx.txhash, tx);
+              const converted: ChainTransaction = {
+                hash: tx.txhash,
+                height: tx.height,
+                timestamp: tx.timestamp,
+                code: tx.code || 0,
+                chain: CHAIN_ID,
+                logs: tx.logs,
+                tx: tx.tx,
+              };
+              allTransactions.set(tx.txhash, converted);
               newTxCount++;
             }
           }
@@ -138,18 +118,15 @@ export async function fetchAllTransactionsClientSide(
           if (offset === 0 && data.pagination?.total) {
             queryTotalReported = parseInt(data.pagination.total, 10);
             console.log(
-              `[Osmosis] ${queryType.name}: ${queryTotalReported} total reported`,
+              `[Babylon] ${queryType.name}: ${queryTotalReported} total reported`,
             );
           }
 
           if (onProgress) {
-            onProgress(allTransactions.size, queryTotalReported);
+            onProgress(allTransactions.size, queryType.name, pagesFetched);
           }
 
-          // Continue if we got a full page (100 items)
           hasMore = batch.length === 100;
-
-          // Also stop if we've fetched more than the reported total
           if (
             queryTotalReported > 0 &&
             offset + batch.length >= queryTotalReported
@@ -160,13 +137,12 @@ export async function fetchAllTransactionsClientSide(
           offset += 100;
           pagesFetched++;
 
-          // Small delay to avoid rate limiting
           if (pagesFetched % 5 === 0) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
         } catch (error) {
           console.error(
-            `[Osmosis] ${queryType.name} offset ${offset} error:`,
+            `[Babylon] ${queryType.name} offset ${offset} error:`,
             error,
           );
           consecutiveErrors++;
@@ -185,19 +161,18 @@ export async function fetchAllTransactionsClientSide(
           queriesWithData.push(`${queryType.name}: ${queryTotalReported}`);
         }
         console.log(
-          `[Osmosis] ${queryType.name}: done, ${allTransactions.size} total unique`,
+          `[Babylon] ${queryType.name}: done, ${allTransactions.size} total unique`,
         );
       }
     }
 
-    // If we got meaningful data, we can stop
     if (endpointSuccess && allTransactions.size > 0) {
-      console.log(`[Osmosis] Got ${allTransactions.size} txs from ${endpoint}`);
+      console.log(`[Babylon] Got ${allTransactions.size} txs from ${endpoint}`);
       break;
     }
   }
 
-  // Convert to array and sort by timestamp (newest first)
+  // Convert to array and sort
   const uniqueTxs = Array.from(allTransactions.values());
   uniqueTxs.sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
@@ -213,10 +188,7 @@ export async function fetchAllTransactionsClientSide(
       ? new Date(Math.max(...dates.map((d) => d.getTime())))
       : null;
 
-  console.log(`[Osmosis] FINAL: ${uniqueTxs.length} unique transactions`);
-  console.log(
-    `[Osmosis] Date range: ${firstDate?.toLocaleDateString()} - ${lastDate?.toLocaleDateString()}`,
-  );
+  console.log(`[Babylon] FINAL: ${uniqueTxs.length} unique transactions`);
 
   return {
     transactions: uniqueTxs,
@@ -226,19 +198,20 @@ export async function fetchAllTransactionsClientSide(
       totalFetched: uniqueTxs.length,
       firstTransactionDate: firstDate?.toISOString(),
       lastTransactionDate: lastDate?.toISOString(),
-      dataSource: `LCD API (${lastSuccessfulEndpoint})`,
+      dataSource: `REST API (${lastSuccessfulEndpoint || "none"})`,
       queryTypesUsed: queriesWithData.length,
       endpoints: [lastSuccessfulEndpoint],
     },
   };
 }
 
-export function isValidOsmosisAddress(address: string): boolean {
-  return /^osmo[a-z0-9]{39}$/i.test(address);
+export function isValidBabylonAddress(address: string): boolean {
+  const config = getChainConfig(CHAIN_ID);
+  return config.addressRegex.test(address);
 }
 
 export function parseTransaction(
-  tx: OsmosisTransaction,
+  tx: ChainTransaction,
   walletAddress: string,
 ): ParsedTransaction {
   const messages = tx.tx?.body?.messages || [];
@@ -259,34 +232,17 @@ export function parseTransaction(
       to = message.to_address || "";
 
       if (message.amount) {
-        const coin = Array.isArray(message.amount)
-          ? message.amount[0]
-          : message.amount;
-        if (coin) {
-          amount = formatAmount(coin.amount);
-          currency = formatDenom(coin.denom);
+        const amountArr = Array.isArray(message.amount)
+          ? message.amount
+          : [message.amount];
+        if (amountArr.length > 0) {
+          amount = formatAmount(amountArr[0].amount);
+          currency = formatDenom(amountArr[0].denom);
         }
-      }
-    } else if (
-      msgType.includes("MsgSwap") ||
-      msgType.includes("SwapExactAmountIn") ||
-      msgType.includes("SwapExactAmountOut")
-    ) {
-      type = "swap";
-      from = message.sender || walletAddress;
-    } else if (msgType.includes("MsgTransfer")) {
-      type = "ibc_transfer";
-      from = message.sender || "";
-      to = message.receiver || "";
-
-      if (message.token) {
-        amount = formatAmount(message.token.amount);
-        currency = formatDenom(message.token.denom);
       }
     } else if (msgType.includes("MsgDelegate")) {
       type = "delegate";
-      from = message.delegator_address || walletAddress;
-      to = message.validator_address || "";
+      from = message.delegator_address || "";
 
       if (message.amount) {
         const coin = Array.isArray(message.amount)
@@ -297,30 +253,21 @@ export function parseTransaction(
           currency = formatDenom(coin.denom);
         }
       }
-    } else if (
-      msgType.includes("MsgUndelegate") ||
-      msgType.includes("MsgBeginUnbonding")
-    ) {
-      type = "undelegate";
-      from = message.delegator_address || walletAddress;
     } else if (msgType.includes("MsgWithdrawDelegatorReward")) {
       type = "claim_rewards";
-      from = message.delegator_address || walletAddress;
+      from = message.delegator_address || "";
+    } else if (msgType.includes("MsgTransfer")) {
+      type = "ibc_transfer";
+      from = message.sender || "";
+      to = message.receiver || "";
+
+      if (message.token) {
+        amount = formatAmount(message.token.amount);
+        currency = formatDenom(message.token.denom);
+      }
     } else if (msgType.includes("MsgVote")) {
       type = "governance_vote";
       from = message.voter || walletAddress;
-    } else if (
-      msgType.includes("JoinPool") ||
-      msgType.includes("JoinSwapExternAmountIn")
-    ) {
-      type = "pool_deposit";
-      from = message.sender || walletAddress;
-    } else if (
-      msgType.includes("ExitPool") ||
-      msgType.includes("ExitSwapShareAmountIn")
-    ) {
-      type = "pool_withdraw";
-      from = message.sender || walletAddress;
     }
   }
 
@@ -332,7 +279,7 @@ export function parseTransaction(
   }
 
   return {
-    hash: tx.txhash,
+    hash: tx.hash,
     timestamp: new Date(tx.timestamp),
     height: parseInt(tx.height, 10),
     type,
@@ -349,20 +296,21 @@ export function parseTransaction(
 }
 
 function formatAmount(amount: string): string {
+  const config = getChainConfig(CHAIN_ID);
   const num = parseInt(amount, 10);
   if (isNaN(num)) return "0";
-  return (num / 1_000_000).toFixed(6);
+  return (num / Math.pow(10, config.decimals)).toFixed(config.decimals);
 }
 
 function formatDenom(denom: string): string {
   if (!denom) return "";
   if (denom.startsWith("ibc/")) return "IBC-Token";
 
+  const config = getChainConfig(CHAIN_ID);
   const denomMap: Record<string, string> = {
-    uosmo: "OSMO",
+    [config.nativeDenom]: config.nativeSymbol,
+    ubbn: "BABY",
     uatom: "ATOM",
-    uusdc: "USDC",
-    uion: "ION",
   };
 
   return denomMap[denom] || denom.toUpperCase();

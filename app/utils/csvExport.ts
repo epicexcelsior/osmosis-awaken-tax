@@ -1,4 +1,9 @@
-import { AwakenTaxRow, AwakenTaxTradingRow, ParsedTransaction, CSVFormat } from '../types';
+import {
+  AwakenTaxRow,
+  AwakenTaxTradingRow,
+  ParsedTransaction,
+  CSVFormat,
+} from "../types";
 
 // Re-export CSVFormat for use in this file
 export type { CSVFormat };
@@ -6,52 +11,89 @@ export type { CSVFormat };
 /**
  * Convert parsed transactions to Awaken Tax CSV format
  * Supports both standard transaction format and trading/perpetuals format
- * 
- * Standard Format Columns: Date, Received Quantity, Received Currency, Sent Quantity, Sent Currency, Fee Amount, Fee Currency, Notes
- * Trading Format Columns: Date, Asset, Amount, Fee, P&L, Payment Token, ID, Notes, Tag, Transaction Hash
  */
 export function convertToAwakenCSV(
-  transactions: ParsedTransaction[], 
+  transactions: ParsedTransaction[],
   walletAddress: string,
-  format: CSVFormat = 'standard'
+  format: CSVFormat = "standard",
 ): AwakenTaxRow[] | AwakenTaxTradingRow[] {
-  if (format === 'trading') {
+  if (format === "trading") {
     return convertToTradingFormat(transactions, walletAddress);
   }
   return convertToStandardFormat(transactions, walletAddress);
 }
 
 /**
- * Convert to standard transaction format
+ * Convert to standard transaction format (Awaken multi-asset template)
  */
-function convertToStandardFormat(transactions: ParsedTransaction[], walletAddress: string): AwakenTaxRow[] {
+function convertToStandardFormat(
+  transactions: ParsedTransaction[],
+  walletAddress: string,
+): AwakenTaxRow[] {
   return transactions.map((tx) => {
-    // Format date as M/D/YY H:MM (e.g., "2/6/23 11:29")
     const date = formatDateForAwakenShort(tx.timestamp);
-    
-    // Determine received/sent based on transaction type
-    let receivedQty = '';
-    let receivedCurrency = '';
-    let sentQty = '';
-    let sentCurrency = '';
-    
-    if (tx.type === 'receive') {
+
+    let receivedQty = "";
+    let receivedCurrency = "";
+    let sentQty = "";
+    let sentCurrency = "";
+
+    if (tx.type === "receive" || tx.type === "claim_rewards") {
       receivedQty = tx.amount;
       receivedCurrency = tx.currency;
-    } else if (tx.type === 'send') {
+    } else if (tx.type === "send" || tx.type === "delegate") {
       sentQty = tx.amount;
       sentCurrency = tx.currency;
+    } else if (tx.type === "swap") {
+      // For swaps, we might have both sent and received
+      sentQty = tx.amount;
+      sentCurrency = tx.currency;
+      if (tx.amount2 && tx.currency2) {
+        receivedQty = tx.amount2;
+        receivedCurrency = tx.currency2;
+      }
+    } else if (tx.type === "ibc_transfer") {
+      // Determine direction based on from/to
+      if (tx.from.toLowerCase() === walletAddress.toLowerCase()) {
+        sentQty = tx.amount;
+        sentCurrency = tx.currency;
+      } else {
+        receivedQty = tx.amount;
+        receivedCurrency = tx.currency;
+      }
     }
-    
+
+    // Build tag based on transaction type
+    const tagMap: Record<string, string> = {
+      send: "transfer",
+      receive: "transfer",
+      swap: "trade",
+      ibc_transfer: "transfer",
+      delegate: "staking",
+      undelegate: "staking",
+      claim_rewards: "staking",
+      pool_deposit: "liquidity",
+      pool_withdraw: "liquidity",
+      governance_vote: "governance",
+      unknown: "",
+    };
+
     return {
-      'Date': date,
-      'Received Quantity': receivedQty,
-      'Received Currency': receivedCurrency,
-      'Sent Quantity': sentQty,
-      'Sent Currency': sentCurrency,
-      'Fee Amount': tx.fee,
-      'Fee Currency': tx.feeCurrency,
-      'Notes': tx.memo || '',
+      Date: date,
+      "Received Quantity": receivedQty,
+      "Received Currency": receivedCurrency,
+      "Received Fiat Amount": "",
+      "Sent Quantity": sentQty,
+      "Sent Currency": sentCurrency,
+      "Sent Fiat Amount": "",
+      "Received Quantity 2": "",
+      "Received Currency 2": "",
+      "Sent Quantity 2": "",
+      "Sent Currency 2": "",
+      "Fee Amount": tx.fee,
+      "Fee Currency": tx.feeCurrency,
+      Notes: tx.memo || `${tx.type} - ${tx.hash.slice(0, 8)}`,
+      Tag: tagMap[tx.type] || "",
     };
   });
 }
@@ -59,123 +101,130 @@ function convertToStandardFormat(transactions: ParsedTransaction[], walletAddres
 /**
  * Convert to trading/perpetuals format
  */
-function convertToTradingFormat(transactions: ParsedTransaction[], walletAddress: string): AwakenTaxTradingRow[] {
+function convertToTradingFormat(
+  transactions: ParsedTransaction[],
+  walletAddress: string,
+): AwakenTaxTradingRow[] {
   return transactions.map((tx, index) => {
-    // Format date as YYYY-MM-DD
     const date = formatDateForTrading(tx.timestamp);
-    
-    // For regular transactions, we don't have P&L data, so we'll use placeholder logic
-    // In a real implementation, you'd parse swap events to determine P&L
-    const isSend = tx.type === 'send';
+    const isSend = tx.type === "send" || tx.type === "delegate";
     const amount = isSend ? `-${tx.amount}` : tx.amount;
-    
+
+    const tagMap: Record<string, string> = {
+      send: "close_position",
+      receive: "open_position",
+      swap: "close_position",
+      delegate: "close_position",
+      claim_rewards: "open_position",
+      ibc_transfer: "transfer",
+    };
+
     return {
-      'Date': date,
-      'Asset': tx.currency || 'UNKNOWN',
-      'Amount': amount,
-      'Fee': tx.fee,
-      'P&L': '', // Would need additional data to calculate P&L
-      'Payment Token': tx.feeCurrency || '',
-      'ID': `TXN${String(index + 1).padStart(3, '0')}`,
-      'Notes': tx.memo || `${tx.type} transaction`,
-      'Tag': isSend ? 'close_position' : 'open_position',
-      'Transaction Hash': tx.hash,
+      Date: date,
+      Asset: tx.currency || "UNKNOWN",
+      Amount: amount,
+      Fee: tx.fee,
+      "P&L": "",
+      "Payment Token": tx.feeCurrency || "",
+      ID: `TXN${String(index + 1).padStart(3, "0")}`,
+      Notes: tx.memo || `${tx.type} transaction`,
+      Tag: tagMap[tx.type] || "other",
+      "Transaction Hash": tx.hash,
     };
   });
 }
 
 /**
  * Format date as required by Awaken Tax short format: M/D/YY H:MM
- * Example: "2/6/23 11:29"
  */
 function formatDateForAwakenShort(date: Date): string {
   const utcDate = new Date(date.toISOString());
-  
-  const month = utcDate.getUTCMonth() + 1; // No leading zero
-  const day = utcDate.getUTCDate(); // No leading zero
-  const year = String(utcDate.getUTCFullYear()).slice(-2); // Last 2 digits
+
+  const month = utcDate.getUTCMonth() + 1;
+  const day = utcDate.getUTCDate();
+  const year = String(utcDate.getUTCFullYear()).slice(-2);
   const hours = utcDate.getUTCHours();
-  const minutes = String(utcDate.getUTCMinutes()).padStart(2, '0'); // Leading zero for minutes
-  
+  const minutes = String(utcDate.getUTCMinutes()).padStart(2, "0");
+
   return `${month}/${day}/${year} ${hours}:${minutes}`;
 }
 
 /**
  * Format date for trading format: YYYY-MM-DD
- * Example: "2024-01-15"
  */
 function formatDateForTrading(date: Date): string {
   const utcDate = new Date(date.toISOString());
-  
+
   const year = utcDate.getUTCFullYear();
-  const month = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(utcDate.getUTCDate()).padStart(2, '0');
-  
+  const month = String(utcDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(utcDate.getUTCDate()).padStart(2, "0");
+
   return `${year}-${month}-${day}`;
 }
 
 /**
  * Generate CSV content from row array
- * Works with both standard and trading formats
  */
-export function generateCSVContent(rows: (AwakenTaxRow | AwakenTaxTradingRow)[]): string {
+export function generateCSVContent(
+  rows: (AwakenTaxRow | AwakenTaxTradingRow)[],
+): string {
   if (rows.length === 0) {
-    return '';
+    return "";
   }
-  
-  // Get headers from first row
+
   const headers = Object.keys(rows[0]);
-  
-  // Create header row
-  const headerRow = headers.join(',');
-  
-  // Create data rows
+  const headerRow = headers.join(",");
+
   const dataRows = rows.map((row) => {
-    return headers.map((header) => {
-      const value = row[header as keyof typeof row];
-      // Escape values that contain commas, quotes, or newlines
-      if (value && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
-        return `"${value.replace(/"/g, '""')}"`;
-      }
-      return value;
-    }).join(',');
+    return headers
+      .map((header) => {
+        const value = row[header as keyof typeof row];
+        if (
+          value &&
+          (value.includes(",") || value.includes('"') || value.includes("\n"))
+        ) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      })
+      .join(",");
   });
-  
-  // Combine all rows
-  return [headerRow, ...dataRows].join('\n');
+
+  return [headerRow, ...dataRows].join("\n");
 }
 
 /**
  * Download CSV file in browser
  */
 export function downloadCSV(csvContent: string, filename: string): void {
-  if (typeof window === 'undefined') {
-    return; // Server-side, do nothing
+  if (typeof window === "undefined") {
+    return;
   }
-  
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  
-  // Create download link
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+
   const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  link.style.visibility = 'hidden';
-  
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = "hidden";
+
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  
-  // Clean up
+
   URL.revokeObjectURL(url);
 }
 
 /**
  * Generate filename for the CSV export
  */
-export function generateFilename(walletAddress: string, format: CSVFormat = 'standard'): string {
-  const date = new Date().toISOString().split('T')[0];
+export function generateFilename(
+  walletAddress: string,
+  format: CSVFormat = "standard",
+): string {
+  const date = new Date().toISOString().split("T")[0];
   const shortAddress = walletAddress.slice(0, 8);
-  const formatSuffix = format === 'trading' ? '-trading' : '';
-  return `osmosis-awaken-${shortAddress}${formatSuffix}-${date}.csv`;
+  const formatSuffix = format === "trading" ? "-trading" : "";
+  return `awaken-${shortAddress}${formatSuffix}-${date}.csv`;
 }

@@ -1,65 +1,122 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { WalletInput } from './components/wallet-input';
-import { TransactionTable } from './components/transaction-table';
-import { ErrorDisplay } from './components/error-display';
-import { fetchAllTransactionsClientSide, parseTransaction, isValidOsmosisAddress } from './services/osmosis-client';
-import { convertToAwakenCSV, generateCSVContent, downloadCSV, generateFilename } from './utils/csvExport';
-import { OsmosisTransaction, ParsedTransaction, CSVFormat } from './types';
+import { useState } from "react";
+import { WalletInput } from "./components/wallet-input";
+import { TransactionTable } from "./components/transaction-table";
+import { ErrorDisplay } from "./components/error-display";
+import {
+  fetchAllTransactionsClientSide as fetchOsmosisTransactions,
+  parseTransaction as parseOsmosisTransaction,
+  isValidOsmosisAddress,
+} from "./services/osmosis-client";
+import {
+  fetchAllTransactionsClientSide as fetchBabylonTransactions,
+  parseTransaction as parseBabylonTransaction,
+  isValidBabylonAddress,
+} from "./services/babylon-client";
+import {
+  convertToAwakenCSV,
+  generateCSVContent,
+  downloadCSV,
+  generateFilename,
+} from "./utils/csvExport";
+import {
+  OsmosisTransaction,
+  ChainTransaction,
+  ParsedTransaction,
+  CSVFormat,
+  ChainId,
+} from "./types";
+import { CHAIN_CONFIGS, DEFAULT_CHAIN } from "./config/chains";
 
 export default function Home() {
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
-  const [rawTransactions, setRawTransactions] = useState<OsmosisTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentAddress, setCurrentAddress] = useState<string>('');
-  const [csvFormat, setCsvFormat] = useState<CSVFormat>('standard');
+  const [currentAddress, setCurrentAddress] = useState<string>("");
+  const [csvFormat, setCsvFormat] = useState<CSVFormat>("standard");
   const [txMetadata, setTxMetadata] = useState<any>(null);
   const [txVerification, setTxVerification] = useState<any>(null);
+  const [selectedChain, setSelectedChain] = useState<ChainId>(DEFAULT_CHAIN);
+
+  const chainConfig = CHAIN_CONFIGS[selectedChain];
 
   const handleWalletSubmit = async (address: string) => {
     setIsLoading(true);
     setError(null);
     setTransactions([]);
-    setRawTransactions([]);
     setTxMetadata(null);
     setTxVerification(null);
 
     try {
-      // Validate address
-      if (!isValidOsmosisAddress(address)) {
-        throw new Error('Invalid Osmosis address format');
+      setCurrentAddress(address);
+      let parsed: ParsedTransaction[] = [];
+
+      if (selectedChain === "osmosis") {
+        if (!isValidOsmosisAddress(address)) {
+          throw new Error("Invalid Osmosis address format");
+        }
+
+        const result = await fetchOsmosisTransactions(
+          address,
+          (count, total) => {
+            console.log(
+              `[Progress] Fetched ${count} of ~${total} transactions`,
+            );
+          },
+        );
+
+        setTxMetadata(result.metadata);
+        parsed = result.transactions.map((tx: OsmosisTransaction) =>
+          parseOsmosisTransaction(tx, address),
+        );
+
+        setTxVerification({
+          complete: result.transactions.length > 0,
+          message:
+            result.transactions.length > 0
+              ? `✓ Found ${result.transactions.length} transactions`
+              : "No transactions found",
+        });
+      } else if (selectedChain === "babylon") {
+        if (!isValidBabylonAddress(address)) {
+          throw new Error("Invalid Babylon address format");
+        }
+
+        const result = await fetchBabylonTransactions(
+          address,
+          (count, query, page) => {
+            console.log(`[Progress] ${query}: page ${page}, ${count} total`);
+          },
+        );
+
+        setTxMetadata(result.metadata);
+        parsed = result.transactions.map((tx: ChainTransaction) =>
+          parseBabylonTransaction(tx, address),
+        );
+
+        setTxVerification({
+          complete: result.transactions.length > 0,
+          message:
+            result.transactions.length > 0
+              ? `✓ Found ${result.transactions.length} transactions`
+              : "No transactions found",
+        });
       }
 
-      setCurrentAddress(address);
-
-      // Fetch transactions client-side (no server needed!)
-      const result = await fetchAllTransactionsClientSide(address, (count, total) => {
-        console.log(`[Progress] Fetched ${count} of ~${total} transactions`);
-      });
-      setRawTransactions(result.transactions);
-      setTxMetadata(result.metadata);
-      setTxVerification({
-        complete: result.transactions.length > 100,
-        message: result.transactions.length > 0 
-          ? `✓ Found ${result.transactions.length} transactions via client-side fetching`
-          : 'No transactions found'
-      });
-
-      // Parse transactions
-      const parsed = result.transactions.map((tx: OsmosisTransaction) => parseTransaction(tx, address));
       setTransactions(parsed);
 
       if (parsed.length === 0) {
-        setError('No transactions found for this address. The wallet may be new or unused.');
+        setError(
+          "No transactions found for this address. The wallet may be new or unused.",
+        );
       }
     } catch (err) {
-      console.error('Error fetching transactions:', err);
+      console.error("Error fetching transactions:", err);
       setError(
-        err instanceof Error 
-          ? err.message 
-          : 'Failed to fetch transactions. Please check the address and try again.'
+        err instanceof Error
+          ? err.message
+          : "Failed to fetch transactions. Please check the address and try again.",
       );
     } finally {
       setIsLoading(false);
@@ -69,10 +126,14 @@ export default function Home() {
   const handleDownloadCSV = () => {
     if (transactions.length === 0 || !currentAddress) return;
 
-    const awakenRows = convertToAwakenCSV(transactions, currentAddress, csvFormat);
+    const awakenRows = convertToAwakenCSV(
+      transactions,
+      currentAddress,
+      csvFormat,
+    );
     const csvContent = generateCSVContent(awakenRows);
-    const filename = generateFilename(currentAddress, csvFormat);
-    
+    const filename = `${selectedChain}-awaken-${currentAddress.slice(0, 8)}-${new Date().toISOString().split("T")[0]}.csv`;
+
     downloadCSV(csvContent, filename);
   };
 
@@ -82,10 +143,11 @@ export default function Home() {
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold tracking-tight text-slate-900 dark:text-slate-50 mb-4">
-            Osmosis Transaction Viewer
+            Multi-Chain Transaction Viewer
           </h1>
           <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            View your Osmosis blockchain transactions and export them in Awaken Tax CSV format for easy tax reporting.
+            View your blockchain transactions and export them in Awaken Tax CSV
+            format for easy tax reporting.
           </p>
         </div>
 
@@ -95,23 +157,28 @@ export default function Home() {
             100% Client-Side - No Server Needed!
           </h3>
           <p className="text-sm text-green-800 dark:text-green-200">
-            This app fetches directly from Osmosis blockchain nodes in your browser. 
-            No API keys needed, no server timeouts, completely free and open source.
-          </p>
-          <p className="text-sm text-green-800 dark:text-green-200 mt-2">
-            Uses multiple query types to find all your transactions: sends, receives, swaps, staking, IBC transfers, and more!
+            This app fetches directly from blockchain nodes in your browser. No
+            API keys needed, no server timeouts, completely free and open
+            source.
           </p>
         </div>
 
-        {/* Wallet Input */}
-        <WalletInput onSubmit={handleWalletSubmit} isLoading={isLoading} />
+        {/* Wallet Input with Chain Selector */}
+        <WalletInput
+          onSubmit={handleWalletSubmit}
+          isLoading={isLoading}
+          selectedChain={selectedChain}
+          onChainChange={setSelectedChain}
+        />
 
         {/* Error Display */}
         {error && !isLoading && (
           <div className="mt-8">
-            <ErrorDisplay 
-              error={error} 
-              onRetry={() => currentAddress && handleWalletSubmit(currentAddress)} 
+            <ErrorDisplay
+              error={error}
+              onRetry={() =>
+                currentAddress && handleWalletSubmit(currentAddress)
+              }
             />
           </div>
         )}
@@ -135,42 +202,72 @@ export default function Home() {
                 </select>
               </div>
               <div className="text-sm text-slate-500 dark:text-slate-400">
-                {csvFormat === 'standard' ? (
-                  <span>Columns: Date, Received/Sent Qty, Currency, Fee, Notes</span>
+                {csvFormat === "standard" ? (
+                  <span>
+                    Columns: Date, Received/Sent Qty, Currency, Fee, Notes
+                  </span>
                 ) : (
                   <span>Columns: Date, Asset, Amount, P&L, Fee, Tag</span>
                 )}
               </div>
             </div>
-            
-            <TransactionTable 
-              transactions={transactions} 
+
+            <TransactionTable
+              transactions={transactions}
               onDownloadCSV={handleDownloadCSV}
               walletAddress={currentAddress}
             />
-            
+
             {/* Transaction Completeness Info */}
             {txVerification && (
-              <div className={`mt-6 p-4 rounded-lg border ${txVerification.complete ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+              <div
+                className={`mt-6 p-4 rounded-lg border ${txVerification.complete ? "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800" : "bg-yellow-50 border-yellow-200"}`}
+              >
                 <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 ${txVerification.complete ? 'text-green-600' : 'text-yellow-600'}`}>
-                    {txVerification.complete ? '✓' : '⚠'}
+                  <div
+                    className={`mt-0.5 ${txVerification.complete ? "text-green-600" : "text-yellow-600"}`}
+                  >
+                    {txVerification.complete ? "✓" : "⚠"}
                   </div>
                   <div className="flex-1">
-                    <h4 className={`font-semibold ${txVerification.complete ? 'text-green-900' : 'text-yellow-900'}`}>
-                      {txVerification.complete ? 'Complete Transaction History' : 'Partial Data'}
+                    <h4
+                      className={`font-semibold ${txVerification.complete ? "text-green-900 dark:text-green-100" : "text-yellow-900"}`}
+                    >
+                      {txVerification.complete
+                        ? "Transaction History Retrieved"
+                        : "Partial Data"}
                     </h4>
-                    <p className={`text-sm mt-1 ${txVerification.complete ? 'text-green-800' : 'text-yellow-800'}`}>
+                    <p
+                      className={`text-sm mt-1 ${txVerification.complete ? "text-green-800 dark:text-green-200" : "text-yellow-800"}`}
+                    >
                       {txVerification.message}
                     </p>
                     {txMetadata && (
-                      <div className="mt-3 text-sm text-slate-600 space-y-1">
-                        <p><strong>Total Transactions:</strong> {txMetadata.totalFetched?.toLocaleString() || transactions.length}</p>
-                        <p><strong>Sent:</strong> {txMetadata.senderCount?.toLocaleString() || 'N/A'} | <strong>Received:</strong> {txMetadata.recipientCount?.toLocaleString() || 'N/A'}</p>
+                      <div className="mt-3 text-sm text-slate-600 dark:text-slate-400 space-y-1">
+                        <p>
+                          <strong>Chain:</strong> {chainConfig.displayName}
+                        </p>
+                        <p>
+                          <strong>Total Transactions:</strong>{" "}
+                          {txMetadata.totalFetched?.toLocaleString() ||
+                            transactions.length}
+                        </p>
                         {txMetadata.firstTransactionDate && (
-                          <p><strong>Date Range:</strong> {new Date(txMetadata.firstTransactionDate).toLocaleDateString()} - {new Date(txMetadata.lastTransactionDate).toLocaleDateString()}</p>
+                          <p>
+                            <strong>Date Range:</strong>{" "}
+                            {new Date(
+                              txMetadata.firstTransactionDate,
+                            ).toLocaleDateString()}{" "}
+                            -{" "}
+                            {new Date(
+                              txMetadata.lastTransactionDate,
+                            ).toLocaleDateString()}
+                          </p>
                         )}
-                        <p><strong>Data Source:</strong> {txMetadata.endpoints?.join(', ') || 'LCD API'}</p>
+                        <p>
+                          <strong>Data Source:</strong>{" "}
+                          {txMetadata.dataSource || "LCD API"}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -184,21 +281,21 @@ export default function Home() {
         {!isLoading && transactions.length === 0 && !error && (
           <div className="mt-16 grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             <div className="p-6 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
-              <h3 className="font-semibold text-lg mb-2">1. Enter Address</h3>
+              <h3 className="font-semibold text-lg mb-2">1. Select Chain</h3>
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Input your Osmosis wallet address starting with &quot;osmo&quot;
+                Choose between Osmosis, Babylon, and more chains coming soon
               </p>
             </div>
             <div className="p-6 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
-              <h3 className="font-semibold text-lg mb-2">2. View Transactions</h3>
+              <h3 className="font-semibold text-lg mb-2">2. Enter Address</h3>
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Browse your transaction history with detailed information
+                Input your wallet address to view transaction history
               </p>
             </div>
             <div className="p-6 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
               <h3 className="font-semibold text-lg mb-2">3. Export CSV</h3>
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Download in Standard or Trading format for Awaken Tax
+                Download in Awaken Tax format for easy tax reporting
               </p>
             </div>
           </div>
@@ -207,10 +304,10 @@ export default function Home() {
         {/* Footer */}
         <footer className="mt-16 text-center text-sm text-slate-500 dark:text-slate-400">
           <p>
-            Built for the Osmosis ecosystem. CSV format compatible with{' '}
-            <a 
-              href="https://awaken.tax" 
-              target="_blank" 
+            Multi-chain transaction viewer. CSV format compatible with{" "}
+            <a
+              href="https://awaken.tax"
+              target="_blank"
               rel="noopener noreferrer"
               className="underline hover:text-slate-700 dark:hover:text-slate-300"
             >
@@ -218,9 +315,9 @@ export default function Home() {
             </a>
           </p>
           <p className="mt-2">
-            <a 
-              href="https://github.com/epicexcelsior/osmosis-awaken-tax" 
-              target="_blank" 
+            <a
+              href="https://github.com/epicexcelsior/osmosis-awaken-tax"
+              target="_blank"
               rel="noopener noreferrer"
               className="underline hover:text-slate-700 dark:hover:text-slate-300"
             >

@@ -1,0 +1,172 @@
+import { ChainConfig, ChainId } from '../types';
+
+export const CHAIN_CONFIGS: Record<ChainId, ChainConfig> = {
+  osmosis: {
+    id: 'osmosis',
+    name: 'Osmosis',
+    displayName: 'Osmosis',
+    icon: '/chains/osmosis.svg',
+    color: '#9D4EDD',
+    gradientFrom: '#9D4EDD',
+    gradientTo: '#C77DFF',
+    addressPrefix: 'osmo',
+    addressRegex: /^osmo[a-z0-9]{39}$/i,
+    testAddress: 'osmo1g8gv8ayl55698fscstajt9uqw9r6w8a34aly9v',
+    rpcEndpoints: [
+      'https://rpc.osmosis.zone',
+      'https://osmosis-rpc.polkachu.com',
+      'https://osmosis-rpc.publicnode.com',
+    ],
+    apiEndpoints: [
+      'https://lcd.osmosis.zone',
+      'https://osmosis-api.polkachu.com',
+      'https://api.osmosis.interbloc.org',
+    ],
+    explorerUrl: 'https://www.mintscan.io/osmosis/tx',
+    apiKey: null, // Public endpoints
+    decimals: 6,
+    nativeDenom: 'uosmo',
+    nativeSymbol: 'OSMO',
+    enabled: true,
+    description: 'Cosmos DEX and DeFi hub',
+  },
+  babylon: {
+    id: 'babylon',
+    name: 'Babylon',
+    displayName: 'Babylon',
+    icon: '/chains/babylon.svg',
+    color: '#CE6533',
+    gradientFrom: '#CE6533',
+    gradientTo: '#E8845A',
+    addressPrefix: 'bbn',
+    addressRegex: /^bbn[a-z0-9]{39}$/i,
+    testAddress: 'bbn1e5h88h7lw6d6d9x9zg5v0p4j7t9z5q0n9s0d8e',
+    rpcEndpoints: [
+      'https://babylon-mainnet-rpc.allthatnode.com:26657/edb5b9348fb34b33855da007fcafebae',
+      'https://babylon-mainnet.g.allthatnode.com/full/tendermint/edb5b9348fb34b33855da007fcafebae',
+    ],
+    apiEndpoints: [
+      'https://babylon-mainnet.g.allthatnode.com/full/rest/edb5b9348fb34b33855da007fcafebae',
+    ],
+    explorerUrl: 'https://babylon.explorers.guru/transaction',
+    apiKey: 'edb5b9348fb34b33855da007fcafebae',
+    decimals: 6,
+    nativeDenom: 'ubbn',
+    nativeSymbol: 'BABY',
+    enabled: true,
+    description: 'Bitcoin staking protocol on Cosmos',
+  },
+  // Placeholders for future chains
+  near: {
+    id: 'near',
+    name: 'NEAR',
+    displayName: 'NEAR Protocol',
+    icon: '/chains/near.svg',
+    color: '#00C08B',
+    gradientFrom: '#00C08B',
+    gradientTo: '#00E8A7',
+    addressPrefix: '',
+    addressRegex: /^[a-z0-9_-]+\.near$/i,
+    testAddress: 'alice.near',
+    rpcEndpoints: [
+      'https://near-mainnet.g.allthatnode.com/full/json_rpc/edb5b9348fb34b33855da007fcafebae',
+    ],
+    apiEndpoints: [],
+    explorerUrl: 'https://nearblocks.io/txns',
+    apiKey: 'edb5b9348fb34b33855da007fcafebae',
+    decimals: 24,
+    nativeDenom: '',
+    nativeSymbol: 'NEAR',
+    enabled: false, // Coming soon
+    description: 'Scalable L1 blockchain (Coming soon)',
+  },
+  polkadot: {
+    id: 'polkadot',
+    name: 'Polkadot',
+    displayName: 'Polkadot',
+    icon: '/chains/polkadot.svg',
+    color: '#E6007A',
+    gradientFrom: '#E6007A',
+    gradientTo: '#FF2B9C',
+    addressPrefix: '1',
+    addressRegex: /^[1-9A-HJ-NP-Za-km-z]{47,48}$/,
+    testAddress: '14DzQhcj2hNuprLiY7y5x3Jt5kQ5Z5Q5Z5Q5Z5Q5Z5Q5Z5',
+    rpcEndpoints: [
+      'https://polkadot-mainnet.g.allthatnode.com/full/json_rpc/edb5b9348fb34b33855da007fcafebae',
+    ],
+    apiEndpoints: [],
+    explorerUrl: 'https://polkadot.subscan.io/extrinsic',
+    apiKey: 'edb5b9348fb34b33855da007fcafebae',
+    decimals: 10,
+    nativeDenom: '',
+    nativeSymbol: 'DOT',
+    enabled: false, // Coming soon
+    description: 'Multi-chain network (Coming soon)',
+  },
+  celo: {
+    id: 'celo',
+    name: 'CELO',
+    displayName: 'Celo',
+    icon: '/chains/celo.svg',
+    color: '#FCFF52',
+    gradientFrom: '#FCFF52',
+    gradientTo: '#FDFF8F',
+    addressPrefix: '0x',
+    addressRegex: /^0x[a-fA-F0-9]{40}$/,
+    testAddress: '0x742d35Cc6634C0532925a3b8D4D6E6d8d8d8d8d8',
+    rpcEndpoints: [
+      'https://celo-mainnet.g.allthatnode.com/full/json_rpc/edb5b9348fb34b33855da007fcafebae',
+    ],
+    apiEndpoints: [
+      'https://explorer.celo.org/mainnet/api',
+    ],
+    explorerUrl: 'https://explorer.celo.org/mainnet/tx',
+    apiKey: 'edb5b9348fb34b33855da007fcafebae',
+    decimals: 18,
+    nativeDenom: '',
+    nativeSymbol: 'CELO',
+    enabled: false, // Coming soon
+    description: 'Mobile-first L1 (Coming soon)',
+  },
+  flow: {
+    id: 'flow',
+    name: 'Flow',
+    displayName: 'Flow',
+    icon: '/chains/flow.svg',
+    color: '#00EF8B',
+    gradientFrom: '#00EF8B',
+    gradientTo: '#47FFB8',
+    addressPrefix: '0x',
+    addressRegex: /^0x[a-fA-F0-9]{16}$/,
+    testAddress: '0x1654653399040a61',
+    rpcEndpoints: [
+      'https://flow-mainnet.g.allthatnode.com/full/json_rpc/edb5b9348fb34b33855da007fcafebae',
+    ],
+    apiEndpoints: [
+      'https://rest-mainnet.onflow.org',
+    ],
+    explorerUrl: 'https://flowscan.org/transaction',
+    apiKey: 'edb5b9348fb34b33855da007fcafebae',
+    decimals: 8,
+    nativeDenom: '',
+    nativeSymbol: 'FLOW',
+    enabled: false, // Coming soon
+    description: 'NFT and gaming chain (Coming soon)',
+  },
+};
+
+export const ENABLED_CHAINS = Object.values(CHAIN_CONFIGS).filter(c => c.enabled);
+
+export function getChainConfig(chainId: ChainId): ChainConfig {
+  const config = CHAIN_CONFIGS[chainId];
+  if (!config) {
+    throw new Error(`Unknown chain: ${chainId}`);
+  }
+  return config;
+}
+
+export function isChainEnabled(chainId: ChainId): boolean {
+  return CHAIN_CONFIGS[chainId]?.enabled ?? false;
+}
+
+export const DEFAULT_CHAIN: ChainId = 'osmosis';
