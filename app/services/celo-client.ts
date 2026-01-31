@@ -44,20 +44,21 @@ export async function fetchAllTransactionsClientSide(
 ): Promise<{ transactions: ChainTransaction[]; metadata: any }> {
   console.log(`[Celo] Starting COMPREHENSIVE fetch for ${address}`);
 
-  // Fetch ALL transaction types concurrently
-  const [
-    regularTransactions,
-    internalTransactions,
-    tokenTransfers,
-    nftTransfers,
-    erc1155Transfers
-  ] = await Promise.all([
-    fetchAllRegularTransactions(address, onProgress),
-    fetchAllInternalTransactions(address),
-    fetchAllTokenTransfers(address),
-    fetchAllNFTTransfers(address),
-    fetchAllERC1155Transfers(address),
-  ]);
+  // Fetch ALL transaction types SEQUENTIALLY to respect rate limit (3/sec)
+  // Etherscan free tier: 3 requests/second = 333ms minimum between requests
+  const regularTransactions = await fetchAllRegularTransactions(address, onProgress);
+  
+  await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+  const internalTransactions = await fetchAllInternalTransactions(address);
+  
+  await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+  const tokenTransfers = await fetchAllTokenTransfers(address);
+  
+  await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+  const nftTransfers = await fetchAllNFTTransfers(address);
+  
+  await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+  const erc1155Transfers = await fetchAllERC1155Transfers(address);
 
   console.log(`[Celo] Fetched ${regularTransactions.length} regular transactions`);
   console.log(`[Celo] Fetched ${internalTransactions.length} internal transactions`);
