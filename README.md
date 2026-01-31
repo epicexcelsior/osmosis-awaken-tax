@@ -1,12 +1,14 @@
-# Osmosis Awaken Tax Integration
+# Multi-Chain Transaction Dashboard
 
-A Next.js application that fetches Osmosis blockchain transactions and exports them in Awaken Tax CSV format for easy tax reporting.
+A Next.js application that fetches blockchain transactions across multiple networks and exports them in Awaken Tax CSV format for easy tax reporting.
 
 ## Features
 
-- **Transaction Viewing**: Enter any Osmosis wallet address to view all transactions
+- **Multi-Chain Support**: View transactions across Osmosis, Babylon, NEAR, Celo, Fantom, Ronin, and Celestia
+- **Transaction Viewing**: Enter any wallet address to view all transactions
 - **CSV Export**: Export transactions in Awaken Tax compatible CSV format
-- **Dual API Support**: Uses free Osmosis LCD API by default, with optional Mintscan API for higher rate limits
+- **100% Client-Side**: All fetching happens in your browser - no server needed
+- **Multiple API Integrations**: Uses various indexed APIs for complete transaction history
 - **Modern UI**: Built with Next.js, TypeScript, Tailwind CSS, and shadcn/ui
 - **Cloudflare Pages Ready**: Configured for easy deployment to Cloudflare Pages
 
@@ -57,6 +59,18 @@ For production use with higher rate limits, you can use the Mintscan API:
 1. Sign up at [https://api.mintscan.io](https://api.mintscan.io)
 2. Get your API key
 3. Set the environment variable: `NEXT_PUBLIC_MINTSCAN_API_KEY`
+
+### Additional API References
+
+| Chain | API | Endpoint | API Key Required |
+|-------|-----|----------|-----------------|
+| Osmosis | LCD API | `https://lcd.osmosis.zone` | No |
+| Babylon | AllThatNode REST | `https://babylon-mainnet.g.allthatnode.com` | Yes |
+| NEAR | Pikespeak AI | `https://api.pikespeak.ai` | Yes |
+| Celo | Blockscout API | `https://explorer.celo.org/api` | No |
+| Fantom | Blockscout API | `https://explorer.fantom.network/api` | No |
+| Ronin | GoldRush (Covalent) | `https://api.covalenthq.com` | Yes |
+| Celestia | Celenium API | `https://api-mainnet.celenium.io` | No |
 
 ## Deployment
 
@@ -151,6 +165,19 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 MIT License - feel free to use this for your own projects.
+
+## Attributions
+
+This project uses the following APIs and services:
+
+- **Celenium API** (Celestia): Data provided by [Celenium API](https://celenium.io). Powered by Celenium API.
+- **GoldRush (Covalent)** (Ronin): Transaction data fetched via GoldRush API
+- **Pikespeak AI** (NEAR): NEAR Protocol transaction data via Pikespeak
+- **Blockscout** (Celo, Fantom): EVM chain data via Blockscout API
+- **AllThatNode** (Babylon, Polkadot, Flow): Cosmos/EVM/RPC data via AllThatNode
+- **Osmosis LCD**: Native Osmosis LCD endpoint
+
+Special thanks to these API providers for enabling 100% client-side blockchain data access.
 
 ## Links
 
