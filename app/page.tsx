@@ -15,6 +15,11 @@ import {
   isValidBabylonAddress,
 } from "./services/babylon-client";
 import {
+  fetchAllTransactionsClientSide as fetchTatumTransactions,
+  parseTransaction as parseTatumTransaction,
+  isValidEvmAddress,
+} from "./services/tatum-client";
+import {
   convertToAwakenCSV,
   generateCSVContent,
   downloadCSV,
@@ -100,6 +105,34 @@ export default function Home() {
           message:
             result.transactions.length > 0
               ? `✓ Found ${result.transactions.length} transactions`
+              : "No transactions found",
+        });
+      } else if (selectedChain === "celo" || selectedChain === "fantom") {
+        // EVM chains via Tatum API
+        if (!isValidEvmAddress(address)) {
+          throw new Error(
+            `Invalid ${chainConfig.displayName} address format. Must be 0x followed by 40 hex characters.`,
+          );
+        }
+
+        const result = await fetchTatumTransactions(
+          selectedChain,
+          address,
+          (count) => {
+            console.log(`[Progress] Fetched ${count} transactions`);
+          },
+        );
+
+        setTxMetadata(result.metadata);
+        parsed = result.transactions.map((tx: ChainTransaction) =>
+          parseTatumTransaction(tx, address),
+        );
+
+        setTxVerification({
+          complete: result.transactions.length > 0,
+          message:
+            result.transactions.length > 0
+              ? `✓ Found ${result.transactions.length} transactions via Tatum API`
               : "No transactions found",
         });
       }

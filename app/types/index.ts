@@ -7,6 +7,7 @@ export type ChainId =
   | "near"
   | "polkadot"
   | "celo"
+  | "fantom"
   | "flow";
 
 // Chain Configuration
